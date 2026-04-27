@@ -11,6 +11,10 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
+<p align="center">
+  <strong>中文</strong> | <a href="./README.en.md">English</a>
+</p>
+
 ---
 
 ## 项目介绍
