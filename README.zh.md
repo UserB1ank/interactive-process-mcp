@@ -65,7 +65,7 @@ src/interactive_process_mcp/
 
 ### 数据流架构
 
-![1](docs\1.png)
+![1](docs/1.png)
 
 **关键设计决策：**
 
@@ -81,7 +81,7 @@ src/interactive_process_mcp/
 
 ### 完整交互流程
 
-![3](docs\3.png)
+![3](docs/3.png)
 
 **步骤详解：**
 
@@ -93,7 +93,7 @@ src/interactive_process_mcp/
 
 ### 会话生命周期
 
-![2](docs\2.png)
+![2](docs/2.png)
 
 - **创建**：`start_process()` 成功后进入运行状态
 - **运行中**：可反复执行读写操作和 PTY 调整

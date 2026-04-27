@@ -65,7 +65,7 @@ src/interactive_process_mcp/
 
 ### Data Flow Architecture
 
-![1](docs\1.png)
+![1](docs/1.png)
 
 **Key Design Decisions:**
 
@@ -81,7 +81,7 @@ src/interactive_process_mcp/
 
 ### Complete Interaction Flow
 
-![3](docs\3.png)
+![3](docs/3.png)
 
 **Step Details:**
 
@@ -93,7 +93,7 @@ src/interactive_process_mcp/
 
 ### Session Lifecycle
 
-![2](docs\2.png)
+![2](docs/2.png)
 
 - **Created**: Enters running state after `start_process()` succeeds
 
