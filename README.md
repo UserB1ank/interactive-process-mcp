@@ -1,7 +1,7 @@
 # interactive-process-mcp
 
 <p align="center">
-  <strong>让 AI Agent 拥有交互式终端能力</strong>
+  <strong>Give AI Agents Interactive Terminal Capabilities</strong>
 </p>
 
 <p align="center">
@@ -12,146 +12,102 @@
 </p>
 
 <p align="center">
-  <strong>中文</strong> | <a href="./README.en.md">English</a>
+  <a href="./README.zh.md">中文</a> | <strong>English</strong>
 </p>
 
 ---
 
-## 项目介绍
+## Introduction
 
-`interactive-process-mcp` 是一个基于 MCP (Model Context Protocol) 协议的服务端，让 AI Agent（如 Claude Code）能够启动、操控和管理**长时间运行的交互式进程**。
+`interactive-process-mcp` is an MCP (Model Context Protocol) server that enables AI Agents (like Claude Code) to start, control, and manage **long-running interactive processes**.
 
-### 为什么需要它？
+### Why Do You Need It?
 
-AI Agent 原生只能执行一次性命令——执行完毕后立刻返回结果。但现实中大量场景需要**多轮交互**：
+AI Agents can natively only execute one-shot commands — they run and immediately return results. But many real-world scenarios require **multi-turn interaction**:
 
-- SSH 到远程服务器，先输密码，再执行命令
-- Python REPL 中逐行调试代码
-- 交互式安装程序中回答 `[Y/n]` 提示
-- 使用 `top`、`htop` 等需要终端的命令
-- 运行安全工具（如 impacket）进行多步骤操作
+- SSH into a remote server, enter a password first, then run commands
+- Debug code line by line in a Python REPL
+- Answer `[Y/n]` prompts in interactive installers
+- Use terminal-dependent commands like `top`, `htop`
+- Run security tools (e.g., impacket) for multi-step operations
 
-这些场景下，进程持续运行，AI Agent 需要在**多个对话轮次中反复读写**进程的输入输出。`interactive-process-mcp` 正是为此而设计的桥梁。
+In these scenarios, the process keeps running, and the AI Agent needs to **repeatedly read and write** the process's I/O across **multiple conversation turns**. `interactive-process-mcp` is the bridge designed precisely for this purpose.
 
-### 核心特性
+### Key Features
 
-| 特性 | 说明 |
-|------|------|
-| **PTY 和 Pipe 双模式** | PTY 模式模拟真实终端（SSH、top、安装器等均可正常运行）；Pipe 模式适用于简单 stdin/stdout 交互 |
-| **多会话管理** | 同时管理多个独立进程，互不干扰 |
-| **ANSI 转义码清除** | 可选自动去除终端控制序列，AI Agent 获得纯净文本 |
-| **非阻塞读取** | Agent 按自己的节奏读取输出，超时返回空而非报错 |
-| **原子发送读取** | `send_and_read` 一步完成发送 + 读取 |
-| **优雅终止** | 先 SIGTERM，等待可配置宽限期后再 SIGKILL |
-| **PTY 尺寸调整** | 运行时动态调整终端行列数 |
+| Feature | Description |
+|---------|-------------|
+| **PTY and Pipe dual mode** | PTY mode emulates a real terminal (SSH, top, installers all work properly); Pipe mode for simple stdin/stdout interaction |
+| **Multi-session management** | Manage multiple independent processes simultaneously without interference |
+| **ANSI escape code stripping** | Optional automatic removal of terminal control sequences for clean text output |
+| **Non-blocking reads** | Agent reads output at its own pace; timeout returns empty instead of error |
+| **Atomic send-and-read** | `send_and_read` combines sending + reading in one step |
+| **Graceful termination** | SIGTERM first, then SIGKILL after a configurable grace period |
+| **PTY resize** | Dynamically adjust terminal rows and columns at runtime |
 
 ---
 
-## 架构设计
+## Architecture
 
-### 模块结构
+### Module Structure
 
 ```
 src/interactive_process_mcp/
-├── server.py            # FastMCP 入口，注册 8 个 Tool 端点
-├── session_manager.py   # SessionManager — 线程安全会话注册表
-├── session.py           # Session — 进程生命周期管理（PTY/Pipe 双模式）
-├── buffer.py            # OutputBuffer — 线程安全环形缓冲区（1MB）
-├── ansi.py              # strip_ansi — 正则清除 ANSI 转义码
-├── tools.py             # 可选的独立 Tool 处理层（测试用）
+├── server.py            # FastMCP entry point, registers 8 Tool endpoints
+├── session_manager.py   # SessionManager — thread-safe session registry
+├── session.py           # Session — process lifecycle management (PTY/Pipe dual mode)
+├── buffer.py            # OutputBuffer — thread-safe ring buffer (1MB)
+├── ansi.py              # strip_ansi — regex-based ANSI escape code removal
+├── tools.py             # Optional standalone Tool handler layer (for testing)
 ├── __init__.py
-└── __main__.py          # python -m 入口
+└── __main__.py          # python -m entry point
 ```
 
-### 数据流架构
+### Data Flow Architecture
 
-> 以下图表可在 draw.io 中编辑，源文件位于 `docs/` 目录。
+![1](docs\1.png)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      AI 客户端 (Claude Code)                      │
-│                          AI Agent                                │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ JSON-RPC over stdio
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     MCP Server (server.py)                       │
-│                    FastMCP — 8 个 Tool 端点                      │
-│                              │                                   │
-│              ┌───────────────▼───────────────┐                   │
-│              │   SessionManager (线程安全)    │                   │
-│              │    session_manager.py          │                   │
-│              └───────────────┬───────────────┘                   │
-│                      ┌───────▼───────┐                           │
-│                      │    Session    │ ← session.py              │
-│                      │  ┌─────────┐  │                           │
-│                      │  │ Output  │  │ ← buffer.py (1MB 环形)   │
-│                      │  │ Buffer  │  │                           │
-│                      │  └─────────┘  │                           │
-│                      │  │ strip_ansi│  │ ← ansi.py              │
-│                      └──┴──────────┘──┘                           │
-└──────────────────────┬──────────┬────────────────────────────────┘
-                       │          │
-              ┌────────▼──┐  ┌───▼────────┐
-              │  PTY 模式  │  │  Pipe 模式  │
-              │  pexpect   │  │  Popen      │
-              │ (SSH/REPL) │  │ (脚本/编译) │
-              └────────────┘  └────────────┘
-```
+**Key Design Decisions:**
 
-**关键设计决策：**
+1. **Ring Buffer**: Each session maintains a max 1MB output buffer. The Reader Thread continuously writes process output to the buffer in 4KB chunks; the Agent consumes output on demand via `read_output`. Consumed data is automatically cleaned up; when capacity is exceeded, the oldest chunks are discarded.
 
-1. **环形缓冲区（Ring Buffer）**：每个会话维护一个最大 1MB 的输出缓冲区。Reader Thread 持续将进程输出以 4KB 块写入缓冲区；Agent 通过 `read_output` 按需消费。已消费的数据自动清理，超出容量时丢弃最早的块。
+2. **Thread Model**: The main thread handles MCP JSON-RPC requests; each Session has an independent daemon Reader Thread that continuously pumps process output into the buffer. Threads coordinate via `threading.Lock` (mutual exclusion) and `threading.Event` (new data notification).
 
-2. **线程模型**：主线程处理 MCP JSON-RPC 请求；每个 Session 拥有独立的 daemon Reader Thread，负责将进程输出持续泵入缓冲区。线程间通过 `threading.Lock`（互斥）和 `threading.Event`（新数据通知）协调。
-
-3. **双模式进程管理**：PTY 模式使用 `pexpect.spawn`（模拟真实终端，支持光标操作、颜色输出）；Pipe 模式使用 `subprocess.Popen`（更轻量，适用于非交互程序）。
+3. **Dual-mode Process Management**: PTY mode uses `pexpect.spawn` (emulates a real terminal, supports cursor operations and colored output); Pipe mode uses `subprocess.Popen` (lighter weight, suitable for non-interactive programs).
 
 ---
 
-## 工作流
+## Workflow
 
-### 完整交互流程
+### Complete Interaction Flow
 
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│ 1.启动    │────▶│ 2.交互    │────▶│ 3.读取    │────▶│ 4.监控    │────▶│ 5.终止    │
-│ start_    │     │ send_    │     │ read_    │     │ list_    │     │terminate_│
-│ process() │     │ input()  │     │ output() │     │sessions()│     │process() │
-└──────────┘     └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                  或 send_and_read()
-                  (原子操作：发送+读取一步完成)
-```
+![3](docs\3.png)
 
-**步骤详解：**
+**Step Details:**
 
-1. **启动进程** — 调用 `start_process`，创建 Session、启动进程、初始化 Reader Thread，返回 `session_id` 和初始输出
-2. **交互操作** — 通过 `send_input` / `send_and_read` 向进程发送文本，`press_enter` 可自动追加换行
-3. **读取输出** — 调用 `read_output` 消费缓冲区中的新数据，支持超时等待和行数限制
-4. **状态监控** — `list_sessions` 查看所有会话，`get_session_info` 获取单个会话详情
-5. **终止进程** — `terminate_process` 优雅关闭（SIGTERM → 等待 → SIGKILL）
+1. **Start Process** — Call `start_process`, which creates a Session, starts the process, initializes the Reader Thread, and returns `session_id` with initial output
+2. **Interact** — Send text to the process via `send_input` / `send_and_read`; `press_enter` can automatically append a newline
+3. **Read Output** — Call `read_output` to consume new data from the buffer; supports timeout wait and line count limit
+4. **Monitor** — `list_sessions` to view all sessions, `get_session_info` for individual session details
+5. **Terminate** — `terminate_process` for graceful shutdown (SIGTERM → wait → SIGKILL)
 
-### 会话生命周期
+### Session Lifecycle
 
-```
-  创建 ──▶ 运行中 ──▶ 已退出
-  (start)  (send/read)  (exit/terminate)
-              │    ▲
-              └────┘ (resize_pty)
-```
+![2](docs\2.png)
 
-- **创建**：`start_process()` 成功后进入运行状态
-- **运行中**：可反复执行读写操作和 PTY 调整
-- **已退出**：进程自然结束或被终止；`exit_code` 已设置，缓冲区残余数据仍可读取
+- **Created**: Enters running state after `start_process()` succeeds
+
+- **Running**: Read/write operations and PTY adjustments can be performed repeatedly
+- **Exited**: Process ends naturally or is terminated; `exit_code` is set, remaining buffer data is still readable
 
 ---
 
-## 效果示例
+## Examples
 
-### 示例 1：SSH 远程操作
+### Example 1: SSH Remote Operations
 
 ```
-AI Agent 操作流程                              进程输出
+AI Agent Flow                                   Process Output
 ─────────────────                              ────────────────
 
 start_process(
@@ -190,10 +146,10 @@ send_and_read(
                                     ←    "deploy@web-server:~$ "
 
 terminate_process(session_id="abc123")
-                                    →    进程终止
+                                    →    Process terminated
 ```
 
-### 示例 2：Python REPL 调试
+### Example 2: Python REPL Debugging
 
 ```
 start_process(command="python3", mode="pty")
@@ -209,10 +165,10 @@ send_and_read(text="[x**2 for x in data]", press_enter=true)
                                     ←    "[1, 4, 9, 16, 25]\n>>> "
 ```
 
-### 示例 3：多会话并行管理
+### Example 3: Multi-session Parallel Management
 
 ```
-# 同时运行多个独立进程
+# Run multiple independent processes simultaneously
 start_process(command="ping", args=["-c", "5", "google.com"], name="ping-test")
   → session_id: "a1b2c3"
 
@@ -222,7 +178,7 @@ start_process(command="python3", args=["-m", "http.server", "8080"], name="web-s
 start_process(command="tail", args=["-f", "/var/log/syslog"], name="log-monitor")
   → session_id: "g7h8i9"
 
-# 查看所有会话状态
+# View all session statuses
 list_sessions()
   → sessions: [
       {id: "a1b2c3", name: "ping-test",    status: "running", pid: 12345},
@@ -230,11 +186,11 @@ list_sessions()
       {id: "g7h8i9", name: "log-monitor",  status: "running", pid: 12347}
     ]
 
-# 按需读取各个会话的输出
-read_output(session_id="a1b2c3")  → ping 统计信息
-read_output(session_id="g7h8i9")  → 最新日志
+# Read output from each session on demand
+read_output(session_id="a1b2c3")  → ping statistics
+read_output(session_id="g7h8i9")  → latest logs
 
-# 完成后终止
+# Terminate when done
 terminate_process(session_id="a1b2c3")
 terminate_process(session_id="d4e5f6")
 terminate_process(session_id="g7h8i9")
@@ -242,108 +198,108 @@ terminate_process(session_id="g7h8i9")
 
 ---
 
-## 工具参考
+## Tool Reference
 
 ### `start_process`
 
-启动一个交互式进程。
+Start an interactive process.
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `command` | string | 是 | — | 要执行的命令 |
-| `args` | string[] | 否 | `[]` | 命令参数 |
-| `mode` | "pty" \| "pipe" | 否 | `"pty"` | I/O 模式 |
-| `name` | string | 否 | 自动生成 | 会话名称 |
-| `cwd` | string | 否 | 继承 | 工作目录 |
-| `env` | object | 否 | 继承 | 环境变量 |
-| `timeout` | number | 否 | `10` | 启动超时（秒） |
-| `rows` | integer | 否 | `24` | PTY 行数 |
-| `cols` | integer | 否 | `80` | PTY 列数 |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `command` | string | Yes | — | Command to execute |
+| `args` | string[] | No | `[]` | Command arguments |
+| `mode` | "pty" \| "pipe" | No | `"pty"` | I/O mode |
+| `name` | string | No | Auto-generated | Session name |
+| `cwd` | string | No | Inherited | Working directory |
+| `env` | object | No | Inherited | Environment variables |
+| `timeout` | number | No | `10` | Startup timeout (seconds) |
+| `rows` | integer | No | `24` | PTY row count |
+| `cols` | integer | No | `80` | PTY column count |
 
-返回：`{ session_id, pid, initial_output }`
+Returns: `{ session_id, pid, initial_output }`
 
 ### `send_input`
 
-向进程发送文本。
+Send text to a process.
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `session_id` | string | 是 | — | 会话 ID |
-| `text` | string | 是 | — | 要发送的文本 |
-| `press_enter` | boolean | 否 | `false` | 是否追加换行 |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+| `text` | string | Yes | — | Text to send |
+| `press_enter` | boolean | No | `false` | Whether to append a newline |
 
 ### `read_output`
 
-读取上次读取后的新输出。无新输出时等待最多 `timeout` 秒，超时返回空。
+Read new output since the last read. Waits up to `timeout` seconds if no new output is available; returns empty on timeout.
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `session_id` | string | 是 | — | 会话 ID |
-| `strip_ansi` | boolean | 否 | `true` | 是否清除 ANSI 转义码 |
-| `timeout` | number | 否 | `5` | 等待时间（秒） |
-| `max_lines` | integer | 否 | `0` | 最大行数（0 = 无限） |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+| `strip_ansi` | boolean | No | `true` | Whether to strip ANSI escape codes |
+| `timeout` | number | No | `5` | Wait time (seconds) |
+| `max_lines` | integer | No | `0` | Max lines (0 = unlimited) |
 
-返回：`{ output, has_more, lines_returned, bytes_returned }`
+Returns: `{ output, has_more, lines_returned, bytes_returned }`
 
 ### `send_and_read`
 
-原子操作：发送输入 + 等待 + 读取输出。参数为 `send_input` 和 `read_output` 的合集。
+Atomic operation: send input + wait + read output. Parameters are the union of `send_input` and `read_output`.
 
 ### `list_sessions`
 
-列出所有会话。返回：`{ sessions: [...] }`
+List all sessions. Returns: `{ sessions: [...] }`
 
 ### `terminate_process`
 
-终止进程。
+Terminate a process.
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `session_id` | string | 是 | — | 会话 ID |
-| `force` | boolean | 否 | `false` | 是否直接 SIGKILL |
-| `grace_period` | number | 否 | `5` | SIGTERM 后等待秒数 |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+| `force` | boolean | No | `false` | Whether to use SIGKILL directly |
+| `grace_period` | number | No | `5` | Seconds to wait after SIGTERM |
 
 ### `resize_pty`
 
-调整 PTY 尺寸（仅 PTY 模式）。
+Resize PTY dimensions (PTY mode only).
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `session_id` | string | 是 | — | 会话 ID |
-| `rows` | integer | 否 | `24` | 行数 |
-| `cols` | integer | 否 | `80` | 列数 |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+| `rows` | integer | No | `24` | Row count |
+| `cols` | integer | No | `80` | Column count |
 
 ### `get_session_info`
 
-获取会话详情。返回：`{ id, name, command, args, mode, status, exit_code, pid, created_at }`
+Get session details. Returns: `{ id, name, command, args, mode, status, exit_code, pid, created_at }`
 
 ---
 
-## 安装
+## Installation
 
 ```bash
 pip install -e .
 ```
 
-开发模式（包含测试依赖）：
+Development mode (with test dependencies):
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-**要求：** Python >= 3.10 / Linux
+**Requirements:** Python >= 3.10 / Linux
 
-## 配置
+## Configuration
 
 ### Claude Code
 
-方式一 — CLI 命令：
+Option 1 — CLI command:
 
 ```bash
 claude mcp add --scope user interactive-process -- interactive-process-mcp
 ```
 
-方式二 — 配置文件（`.claude/settings.json` 或 `.mcp.json`）：
+Option 2 — Config file (`.claude/settings.json` or `.mcp.json`):
 
 ```json
 {
@@ -355,7 +311,7 @@ claude mcp add --scope user interactive-process -- interactive-process-mcp
 }
 ```
 
-方式三 — 从源码运行：
+Option 3 — Run from source:
 
 ```json
 {
@@ -368,30 +324,30 @@ claude mcp add --scope user interactive-process -- interactive-process-mcp
 }
 ```
 
-### 其他 MCP 客户端
+### Other MCP Clients
 
-任何支持 stdio 传输的 MCP 客户端均可使用。入口点：
+Any MCP client that supports stdio transport can use this server. Entry points:
 
 ```bash
 interactive-process-mcp
-# 或
+# or
 python -m interactive_process_mcp
 ```
 
 ---
 
-## 测试
+## Testing
 
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-测试覆盖 42 个用例，涵盖 ANSI 清除、环形缓冲区、会话生命周期（PTY 和 Pipe 模式）、会话管理器和 Tool 集成。
+The test suite covers 42 cases, including ANSI stripping, ring buffer, session lifecycle (PTY and Pipe modes), session manager, and Tool integration.
 
-## 图表资源
+## Diagram Resources
 
-架构图、工作流时序图和会话生命周期图可在 `docs/` 目录中找到，使用浏览器打开 HTML 文件即可在 draw.io 中编辑。
+Architecture diagrams, workflow sequence diagrams, and session lifecycle diagrams are available in the `docs/` directory. Open the HTML files in a browser to edit them in draw.io.
 
 ## License
 
