@@ -31,6 +31,14 @@ pip install -e ".[dev]"
 
 ### Claude Code
 
+command
+
+```
+claude mcp add --scope user interactive-process -- interactive-process-mcp
+```
+
+Or
+
 Add to your Claude Code MCP settings (`.claude/settings.json` or project-level `.mcp.json`):
 
 ```json
