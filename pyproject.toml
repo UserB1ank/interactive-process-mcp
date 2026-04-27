@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "interactive-process-mcp"
+version = "0.1.0"
+description = "MCP server for managing interactive processes"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "pexpect>=4.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+interactive-process-mcp = "interactive_process_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
