@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/Platform-Linux-orange.svg" alt="Linux">
-  <img src="https://img.shields.io/badge/MCP-stdio_transport-green.svg" alt="MCP stdio">
+  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey" alt="macOS / Linux">
+  <img src="https://img.shields.io/badge/MCP-SSE_Transport-green.svg" alt="MCP SSE">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
@@ -37,8 +37,10 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 | Feature | Description |
 |---------|-------------|
-| **PTY and Pipe dual mode** | PTY mode emulates a real terminal (SSH, top, installers all work properly); Pipe mode for simple stdin/stdout interaction |
+| **PTY and Pipe dual mode** | PTY mode emulates a real terminal; Pipe mode for simple stdin/stdout interaction |
+| **Remote deployment** | SSE over HTTP transport — Agent and Server can run on different machines |
 | **Multi-session management** | Manage multiple independent processes simultaneously without interference |
+| **Message persistence** | Session records and I/O messages persisted to local JSON files |
 | **ANSI escape code stripping** | Optional automatic removal of terminal control sequences for clean text output |
 | **Non-blocking reads** | Agent reads output at its own pace; timeout returns empty instead of error |
 | **Atomic send-and-read** | `send_and_read` combines sending + reading in one step |
@@ -49,56 +51,57 @@ In these scenarios, the process keeps running, and the AI Agent needs to **repea
 
 ## Architecture
 
-### Module Structure
+```
+┌──────┐  SSE/HTTP  ┌──────────────┐  Internal SSH  ┌──────────┐
+│Agent │ ──────────> │ Go Server    │ ──────────────> │ PTY/     │
+│(MCP) │             │ - MCP API    │  (localhost)    │ Process  │
+└──────┘             │ - SSH Server │                 └──────────┘
+                     └──────────────┘
+                            │
+                            ▼
+                     ┌──────────────┐
+                     │ JSON Storage │
+                     │ - sessions   │
+                     │ - messages   │
+                     └──────────────┘
+```
+
+### Project Structure
 
 ```
-src/interactive_process_mcp/
-├── server.py            # FastMCP entry point, registers 8 Tool endpoints
-├── session_manager.py   # SessionManager — thread-safe session registry
-├── session.py           # Session — process lifecycle management (PTY/Pipe dual mode)
-├── buffer.py            # OutputBuffer — thread-safe ring buffer (1MB)
-├── ansi.py              # strip_ansi — regex-based ANSI escape code removal
-├── tools.py             # Optional standalone Tool handler layer (for testing)
-├── __init__.py
-└── __main__.py          # python -m entry point
+.
+├── cmd/server/main.go           # Entry point
+├── internal/
+│   ├── config/config.go         # Configuration
+│   ├── mcp/
+│   │   ├── server.go            # MCP SSE server & tool registration
+│   │   └── handlers.go          # 10 tool handlers
+│   ├── sshserver/server.go      # Internal SSH server (gliderlabs/ssh)
+│   ├── sshclient/client.go      # Internal SSH client (crypto/ssh)
+│   ├── session/
+│   │   ├── session.go           # Session lifecycle
+│   │   └── manager.go           # Thread-safe session registry
+│   ├── buffer/buffer.go         # Ring buffer (1MB)
+│   ├── storage/store.go         # JSON file persistence
+│   ├── message/message.go       # Message management
+│   └── ansi/strip.go            # ANSI escape code removal
+├── pkg/api/types.go             # Public types (Session, Message)
+├── go.mod
+└── go.sum
 ```
 
-### Data Flow Architecture
+### Key Design Decisions
 
-![1](docs/1.png)
+1. **Internal SSH Architecture**: The server starts a gliderlabs/SSH server on localhost. Each `start_process` creates an SSH session via crypto/ssh client, leveraging SSH's mature PTY allocation, window resize, and environment variable passing mechanisms.
 
-**Key Design Decisions:**
+2. **SSE over HTTP Transport**: Unlike traditional stdio-based MCP servers, this server exposes an HTTP endpoint supporting MCP SSE transport. Agents connect remotely, enabling cross-machine deployment.
 
-1. **Ring Buffer**: Each session maintains a max 1MB output buffer. The Reader Thread continuously writes process output to the buffer in 4KB chunks; the Agent consumes output on demand via `read_output`. Consumed data is automatically cleaned up; when capacity is exceeded, the oldest chunks are discarded.
+3. **JSON File Persistence**: Session metadata and I/O messages are stored as local JSON files, surviving server restarts:
+   - `data/sessions.json` — Session list
+   - `data/messages/{session_id}/index.json` — Message index
+   - `data/messages/{session_id}/messages/{msg_id}.json` — Message content
 
-2. **Thread Model**: The main thread handles MCP JSON-RPC requests; each Session has an independent daemon Reader Thread that continuously pumps process output into the buffer. Threads coordinate via `threading.Lock` (mutual exclusion) and `threading.Event` (new data notification).
-
-3. **Dual-mode Process Management**: PTY mode uses `pexpect.spawn` (emulates a real terminal, supports cursor operations and colored output); Pipe mode uses `subprocess.Popen` (lighter weight, suitable for non-interactive programs).
-
----
-
-## Workflow
-
-### Complete Interaction Flow
-
-![3](docs/3.png)
-
-**Step Details:**
-
-1. **Start Process** — Call `start_process`, which creates a Session, starts the process, initializes the Reader Thread, and returns `session_id` with initial output
-2. **Interact** — Send text to the process via `send_input` / `send_and_read`; `press_enter` can automatically append a newline
-3. **Read Output** — Call `read_output` to consume new data from the buffer; supports timeout wait and line count limit
-4. **Monitor** — `list_sessions` to view all sessions, `get_session_info` for individual session details
-5. **Terminate** — `terminate_process` for graceful shutdown (SIGTERM → wait → SIGKILL)
-
-### Session Lifecycle
-
-![2](docs/2.png)
-
-- **Created**: Enters running state after `start_process()` succeeds
-
-- **Running**: Read/write operations and PTY adjustments can be performed repeatedly
-- **Exited**: Process ends naturally or is terminated; `exit_code` is set, remaining buffer data is still readable
+4. **Ring Buffer**: Each running session maintains a 1MB in-memory ring buffer for real-time I/O, with output simultaneously persisted to storage.
 
 ---
 
@@ -122,7 +125,6 @@ send_and_read(
   press_enter=true
 )
                                     ←    "Welcome to Ubuntu 22.04 LTS
-                                          Last login: Fri Apr 25 10:30:00 2026
                                           deploy@web-server:~$ "
 
 send_and_read(
@@ -133,20 +135,7 @@ send_and_read(
                                           /dev/sda1       100G   45G   55G  45% /
                                           deploy@web-server:~$ "
 
-send_and_read(
-  text="sudo systemctl restart nginx",
-  press_enter=true
-)
-                                    ←    "[sudo] password for deploy: "
-
-send_and_read(
-  text="deploy_password",
-  press_enter=true
-)
-                                    ←    "deploy@web-server:~$ "
-
 terminate_process(session_id="abc123")
-                                    →    Process terminated
 ```
 
 ### Example 2: Python REPL Debugging
@@ -160,40 +149,24 @@ send_and_read(text="data = [1, 2, 3, 4, 5]", press_enter=true)
 
 send_and_read(text="sum(data)", press_enter=true)
                                     ←    "15\n>>> "
-
-send_and_read(text="[x**2 for x in data]", press_enter=true)
-                                    ←    "[1, 4, 9, 16, 25]\n>>> "
 ```
 
 ### Example 3: Multi-session Parallel Management
 
 ```
-# Run multiple independent processes simultaneously
 start_process(command="ping", args=["-c", "5", "google.com"], name="ping-test")
   → session_id: "a1b2c3"
 
 start_process(command="python3", args=["-m", "http.server", "8080"], name="web-server")
   → session_id: "d4e5f6"
 
-start_process(command="tail", args=["-f", "/var/log/syslog"], name="log-monitor")
-  → session_id: "g7h8i9"
-
-# View all session statuses
 list_sessions()
-  → sessions: [
-      {id: "a1b2c3", name: "ping-test",    status: "running", pid: 12345},
-      {id: "d4e5f6", name: "web-server",   status: "running", pid: 12346},
-      {id: "g7h8i9", name: "log-monitor",  status: "running", pid: 12347}
-    ]
+  → [{id: "a1b2c3", status: "running"}, {id: "d4e5f6", status: "running"}]
 
-# Read output from each session on demand
 read_output(session_id="a1b2c3")  → ping statistics
-read_output(session_id="g7h8i9")  → latest logs
 
-# Terminate when done
 terminate_process(session_id="a1b2c3")
 terminate_process(session_id="d4e5f6")
-terminate_process(session_id="g7h8i9")
 ```
 
 ---
@@ -210,9 +183,6 @@ Start an interactive process.
 | `args` | string[] | No | `[]` | Command arguments |
 | `mode` | "pty" \| "pipe" | No | `"pty"` | I/O mode |
 | `name` | string | No | Auto-generated | Session name |
-| `cwd` | string | No | Inherited | Working directory |
-| `env` | object | No | Inherited | Environment variables |
-| `timeout` | number | No | `10` | Startup timeout (seconds) |
 | `rows` | integer | No | `24` | PTY row count |
 | `cols` | integer | No | `80` | PTY column count |
 
@@ -230,12 +200,12 @@ Send text to a process.
 
 ### `read_output`
 
-Read new output since the last read. Waits up to `timeout` seconds if no new output is available; returns empty on timeout.
+Read new output since the last read.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `session_id` | string | Yes | — | Session ID |
-| `strip_ansi` | boolean | No | `true` | Whether to strip ANSI escape codes |
+| `strip_ansi` | boolean | No | `true` | Strip ANSI escape codes |
 | `timeout` | number | No | `5` | Wait time (seconds) |
 | `max_lines` | integer | No | `0` | Max lines (0 = unlimited) |
 
@@ -249,6 +219,10 @@ Atomic operation: send input + wait + read output. Parameters are the union of `
 
 List all sessions. Returns: `{ sessions: [...] }`
 
+### `get_session_info`
+
+Get session details. Returns: `{ id, name, command, args, mode, status, exit_code, pid, created_at }`
+
 ### `terminate_process`
 
 Terminate a process.
@@ -256,7 +230,7 @@ Terminate a process.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `session_id` | string | Yes | — | Session ID |
-| `force` | boolean | No | `false` | Whether to use SIGKILL directly |
+| `force` | boolean | No | `false` | Use SIGKILL directly |
 | `grace_period` | number | No | `5` | Seconds to wait after SIGTERM |
 
 ### `resize_pty`
@@ -269,56 +243,67 @@ Resize PTY dimensions (PTY mode only).
 | `rows` | integer | No | `24` | Row count |
 | `cols` | integer | No | `80` | Column count |
 
-### `get_session_info`
+### `list_messages`
 
-Get session details. Returns: `{ id, name, command, args, mode, status, exit_code, pid, created_at }`
+List the message index for a session.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+
+Returns: `{ messages: [{id, type, created_at, byte_size}, ...] }`
+
+### `get_message`
+
+Get the content of one or more messages.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | Yes | — | Session ID |
+| `message_ids` | string[] | No | — | Message IDs to retrieve |
+
+Returns: `{ messages: [{id, session_id, type, content, created_at, byte_size}, ...] }`
 
 ---
 
 ## Installation
 
-```bash
-pip install -e .
-```
-
-Development mode (with test dependencies):
+### Build from source
 
 ```bash
-pip install -e ".[dev]"
+go build -o server ./cmd/server
 ```
 
-**Requirements:** Python >= 3.10 / Linux
+**Requirements:** Go >= 1.21 / macOS or Linux
+
+### Run
+
+```bash
+./server --host 0.0.0.0 --port 8080 --data-dir ./data
+```
+
+Options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `0.0.0.0` | HTTP server host |
+| `--port` | `8080` | HTTP server port |
+| `--data-dir` | `./data` | JSON storage directory |
+| `--ssh-host` | `127.0.0.1` | Internal SSH server host |
+| `--ssh-port` | `0` (random) | Internal SSH server port |
 
 ## Configuration
 
 ### Claude Code
 
-Option 1 — CLI command:
-
-```bash
-claude mcp add --scope user interactive-process -- interactive-process-mcp
-```
-
-Option 2 — Config file (`.claude/settings.json` or `.mcp.json`):
+In `.claude/settings.json` or `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "interactive-process": {
-      "command": "interactive-process-mcp"
-    }
-  }
-}
-```
-
-Option 3 — Run from source:
-
-```json
-{
-  "mcpServers": {
-    "interactive-process": {
-      "command": "python",
-      "args": ["-m", "interactive_process_mcp"]
+      "url": "http://your-server:8080/sse",
+      "transport": "sse"
     }
   }
 }
@@ -326,28 +311,9 @@ Option 3 — Run from source:
 
 ### Other MCP Clients
 
-Any MCP client that supports stdio transport can use this server. Entry points:
-
-```bash
-interactive-process-mcp
-# or
-python -m interactive_process_mcp
-```
+Any MCP client that supports SSE transport can connect to `http://<host>:<port>/sse`.
 
 ---
-
-## Testing
-
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-```
-
-The test suite covers 42 cases, including ANSI stripping, ring buffer, session lifecycle (PTY and Pipe modes), session manager, and Tool integration.
-
-## Diagram Resources
-
-Architecture diagrams, workflow sequence diagrams, and session lifecycle diagrams are available in the `docs/` directory. Open the HTML files in a browser to edit them in draw.io.
 
 ## License
 

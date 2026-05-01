@@ -3,3 +3,14 @@ __pycache__/
 venv/
 build/
 *.Identifier
+
+# Go
+/server
+*.exe
+
+# IDE
+.idea/
+
+# Data
+data/
+testdata/
