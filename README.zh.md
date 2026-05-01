@@ -302,11 +302,17 @@ go build -o server ./cmd/server
 {
   "mcpServers": {
     "interactive-process": {
-      "url": "http://your-server:8080/sse",
-      "transport": "sse"
+      "type": "sse",
+      "url": "http://your-server:8080/sse"
     }
   }
 }
+```
+
+或通过 CLI：
+
+```bash
+claude mcp add --transport sse interactive-process http://localhost:8080/sse
 ```
 
 ### 其他 MCP 客户端

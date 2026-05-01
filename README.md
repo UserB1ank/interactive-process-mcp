@@ -302,11 +302,17 @@ In `.claude/settings.json` or `.mcp.json`:
 {
   "mcpServers": {
     "interactive-process": {
-      "url": "http://your-server:8080/sse",
-      "transport": "sse"
+      "type": "sse",
+      "url": "http://your-server:8080/sse"
     }
   }
 }
+```
+
+Or via CLI:
+
+```bash
+claude mcp add --transport sse interactive-process http://localhost:8080/sse
 ```
 
 ### Other MCP Clients
