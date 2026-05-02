@@ -9,6 +9,7 @@ import (
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mac01/interactive-process-mcp/internal/session"
+	"github.com/mac01/interactive-process-mcp/pkg/api"
 )
 
 func getString(args map[string]any, key, def string) string {
@@ -104,7 +105,7 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 	sess, err := s.sessMgr.Create(session.Config{
 		Command: command,
 		Args:    getStringSlice(args, "args"),
-		Mode:    getString(args, "mode", "pty"),
+		Mode:    api.SessionMode(getString(args, "mode", "pty")),
 		Name:    getString(args, "name", ""),
 		Rows:    int(getFloat64(args, "rows", 24)),
 		Cols:    int(getFloat64(args, "cols", 80)),

@@ -13,8 +13,8 @@ func TestStore_SaveLoadSessions(t *testing.T) {
 	s := New(dir)
 
 	sessions := []api.Session{
-		{ID: "abc123", Command: "bash", Mode: "pty", Status: api.SessionRunning},
-		{ID: "def456", Command: "cat", Mode: "pipe", Status: api.SessionExited},
+		{ID: "abc123", Command: "bash", Mode: api.ModePTY, Status: api.SessionRunning},
+		{ID: "def456", Command: "cat", Mode: api.ModePipe, Status: api.SessionExited},
 	}
 
 	if err := s.SaveSessions(sessions); err != nil {
