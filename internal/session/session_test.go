@@ -19,10 +19,21 @@ func startTestServer(t *testing.T) (*sshserver.Server, string) {
 	return srv, srv.Addr()
 }
 
+func testConfig(command string, args []string, mode string, name string) Config {
+	return Config{
+		Command: command,
+		Args:    args,
+		Mode:    mode,
+		Name:    name,
+		Rows:    24,
+		Cols:    80,
+	}
+}
+
 func TestSession_CreateAndInfo(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "bash", nil, "pty", "test-session", 24, 80, nil)
+	s, err := New(addr, testConfig("bash", nil, "pty", "test-session"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +57,7 @@ func TestSession_CreateAndInfo(t *testing.T) {
 func TestSession_SendInputReadOutput(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "bash", nil, "pty", "", 24, 80, nil)
+	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +69,10 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Loop-read until we see the expected output
 	var output string
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		chunk := s.ReadOutput(500*time.Millisecond, true, 0)
+		chunk, _ := s.ReadOutput(500*time.Millisecond, true, 0)
 		output += chunk
 		if strings.Contains(output, "session_test") {
 			break
@@ -76,7 +86,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 func TestSession_Terminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "sleep", []string{"60"}, "pipe", "", 24, 80, nil)
+	s, err := New(addr, testConfig("sleep", []string{"60"}, "pipe", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +98,6 @@ func TestSession_Terminate(t *testing.T) {
 
 	s.Terminate(false, 2*time.Second)
 
-	// Wait for exit goroutine to update status
 	time.Sleep(200 * time.Millisecond)
 
 	info = s.Info()
@@ -103,7 +112,7 @@ func TestSession_Terminate(t *testing.T) {
 func TestSession_ForceTerminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "sleep", []string{"60"}, "pipe", "", 24, 80, nil)
+	s, err := New(addr, testConfig("sleep", []string{"60"}, "pipe", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +129,7 @@ func TestSession_ForceTerminate(t *testing.T) {
 func TestSession_ResizePty(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "bash", nil, "pty", "", 24, 80, nil)
+	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +148,7 @@ func TestSession_ResizePty(t *testing.T) {
 func TestSession_ResizePtyPipeMode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, "cat", nil, "pipe", "", 24, 80, nil)
+	s, err := New(addr, testConfig("cat", nil, "pipe", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,16 +163,13 @@ func TestSession_ResizePtyPipeMode(t *testing.T) {
 func TestSession_SendInputAfterExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	// Use PTY mode to avoid pipe mode stdin deadlock
-	s, err := New(addr, "bash", nil, "pty", "", 24, 80, nil)
+	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Tell bash to exit
 	s.SendInput("exit", true)
 
-	// Wait for the process to exit
 	time.Sleep(1 * time.Second)
 
 	err = s.SendInput("should fail", true)
@@ -175,13 +181,11 @@ func TestSession_SendInputAfterExit(t *testing.T) {
 func TestSession_NaturalExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	// Use PTY mode to avoid pipe mode stdin deadlock
-	s, err := New(addr, "bash", []string{"-c", "echo hello"}, "pty", "", 24, 80, nil)
+	s, err := New(addr, Config{Command: "bash", Args: []string{"-c", "echo hello"}, Mode: "pty", Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Wait for natural exit
 	time.Sleep(2 * time.Second)
 
 	info := s.Info()
@@ -198,7 +202,7 @@ func TestManager_CreateAndGet(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create("echo", []string{"hi"}, "pipe", "test", 24, 80)
+	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: "pipe", Name: "test", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,8 +221,8 @@ func TestManager_ListAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create("echo", []string{"a"}, "pipe", "s1", 24, 80)
-	mgr.Create("echo", []string{"b"}, "pipe", "s2", 24, 80)
+	mgr.Create(Config{Command: "echo", Args: []string{"a"}, Mode: "pipe", Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "echo", Args: []string{"b"}, Mode: "pipe", Name: "s2", Rows: 24, Cols: 80})
 
 	all := mgr.ListAll()
 	if len(all) != 2 {
@@ -231,8 +235,8 @@ func TestManager_CleanupAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create("sleep", []string{"60"}, "pipe", "s1", 24, 80)
-	mgr.Create("sleep", []string{"60"}, "pipe", "s2", 24, 80)
+	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Name: "s2", Rows: 24, Cols: 80})
 
 	mgr.CleanupAll(true)
 
@@ -242,5 +246,33 @@ func TestManager_CleanupAll(t *testing.T) {
 		if s.Status != api.SessionExited {
 			t.Fatalf("expected all sessions exited, got %q for %s", s.Status, s.ID)
 		}
+	}
+}
+
+func TestManager_Delete(t *testing.T) {
+	_, addr := startTestServer(t)
+
+	mgr := NewManager(addr, nil, nil)
+
+	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: "pipe", Name: "del-me", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	if mgr.Get(s.ID) == nil {
+		t.Fatal("expected session to exist")
+	}
+
+	mgr.Delete(s.ID)
+
+	if mgr.Get(s.ID) != nil {
+		t.Fatal("expected session to be deleted")
+	}
+
+	all := mgr.ListAll()
+	if len(all) != 0 {
+		t.Fatalf("expected 0 sessions after delete, got %d", len(all))
 	}
 }

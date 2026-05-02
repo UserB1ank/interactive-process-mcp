@@ -80,6 +80,11 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to wait after SIGTERM"), mcpgo.DefaultNumber(5)),
 	), s.handleTerminateProcess)
 
+	mcpServer.AddTool(mcpgo.NewTool("delete_session",
+		mcpgo.WithDescription("Delete an exited session from the registry"),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+	), s.handleDeleteSession)
+
 	mcpServer.AddTool(mcpgo.NewTool("resize_pty",
 		mcpgo.WithDescription("Resize the PTY terminal dimensions for a session"),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),

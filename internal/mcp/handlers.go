@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	"github.com/mac01/interactive-process-mcp/internal/session"
 )
 
 func getString(args map[string]any, key, def string) string {
@@ -64,19 +65,20 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 		return mcpgo.NewToolResultError("command is required"), nil
 	}
 
-	cmdArgs := getStringSlice(args, "args")
-	mode := getString(args, "mode", "pty")
-	name := getString(args, "name", "")
-	rows := int(getFloat64(args, "rows", 24))
-	cols := int(getFloat64(args, "cols", 80))
-
-	sess, err := s.sessMgr.Create(command, cmdArgs, mode, name, rows, cols)
+	sess, err := s.sessMgr.Create(session.Config{
+		Command: command,
+		Args:    getStringSlice(args, "args"),
+		Mode:    getString(args, "mode", "pty"),
+		Name:    getString(args, "name", ""),
+		Rows:    int(getFloat64(args, "rows", 24)),
+		Cols:    int(getFloat64(args, "cols", 80)),
+	})
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	initial := sess.ReadOutput(500*time.Millisecond, true, 0)
+	initial, _ := sess.ReadOutput(500*time.Millisecond, true, 0)
 
 	result := map[string]any{
 		"session_id":     sess.ID,
@@ -115,7 +117,10 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	if sess == nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
 	}
-	output := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	result := map[string]any{
 		"output":         output,
 		"has_more":       sess.HasMoreOutput(readerID),
@@ -144,7 +149,10 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	time.Sleep(100 * time.Millisecond)
-	output := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	result := map[string]any{
 		"output":         output,
 		"has_more":       sess.HasMoreOutput(readerID),
@@ -185,7 +193,22 @@ func (s *Server) handleTerminateProcess(ctx context.Context, request mcpgo.CallT
 	if sess == nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
 	}
-	sess.Terminate(force, time.Duration(gracePeriod*float64(time.Second)))
+	s.sessMgr.Terminate(sessionID, force, gracePeriod)
+	return mcpgo.NewToolResultText(`{"success":true}`), nil
+}
+
+func (s *Server) handleDeleteSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+
+	sess := s.sessMgr.Get(sessionID)
+	if sess == nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	}
+	if sess.Info().Status == "running" {
+		return mcpgo.NewToolResultError("cannot delete a running session, terminate it first"), nil
+	}
+	s.sessMgr.Delete(sessionID)
 	return mcpgo.NewToolResultText(`{"success":true}`), nil
 }
 

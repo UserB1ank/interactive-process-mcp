@@ -11,11 +11,11 @@ import (
 
 // Manager is a thread-safe registry of sessions with persistence.
 type Manager struct {
-	sessions  map[string]*Session
-	mu        sync.RWMutex
-	sshAddr   string
-	msgMgr    *message.Manager
-	store     *storage.Store
+	sessions map[string]*Session
+	mu       sync.RWMutex
+	sshAddr  string
+	msgMgr   *message.Manager
+	store    *storage.Store
 }
 
 // NewManager creates a Manager.
@@ -29,8 +29,8 @@ func NewManager(sshAddr string, msgMgr *message.Manager, store *storage.Store) *
 }
 
 // Create starts a new session and registers it.
-func (m *Manager) Create(command string, args []string, mode string, name string, rows, cols int) (*Session, error) {
-	s, err := New(m.sshAddr, command, args, mode, name, rows, cols, m.msgMgr)
+func (m *Manager) Create(cfg Config) (*Session, error) {
+	s, err := New(m.sshAddr, cfg, m.msgMgr)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,19 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod float64) {
 	m.mu.RUnlock()
 	if s != nil {
 		s.Terminate(force, time.Duration(gracePeriod*float64(time.Second)))
+		m.persist()
+	}
+}
+
+// Delete removes an exited session from the registry.
+func (m *Manager) Delete(id string) {
+	m.mu.Lock()
+	s := m.sessions[id]
+	if s != nil {
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+	if s != nil {
 		m.persist()
 	}
 }
