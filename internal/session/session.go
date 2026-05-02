@@ -18,12 +18,14 @@ import (
 // Session wraps an interactive process session managed over SSH.
 type Session struct {
 	api.Session
-	mu          sync.RWMutex
-	execSession *sshclient.ExecSession
-	buf         *buffer.Buffer
-	readerID    int
-	msgMgr      *message.Manager
-	sshAddr     string
+	mu            sync.RWMutex
+	stdinMu       sync.Mutex
+	terminateOnce sync.Once
+	execSession   *sshclient.ExecSession
+	buf           *buffer.Buffer
+	readerID      int
+	msgMgr        *message.Manager
+	sshAddr       string
 }
 
 // New creates and starts a new Session.
@@ -115,14 +117,17 @@ func (s *Session) startReaders() {
 // SendInput writes text to the process stdin.
 func (s *Session) SendInput(text string, pressEnter bool) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if s.Status != api.SessionRunning {
+		s.mu.RUnlock()
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
 	if pressEnter {
 		text += "\n"
 	}
+	s.stdinMu.Lock()
 	_, err := s.execSession.Stdin.Write([]byte(text))
+	s.stdinMu.Unlock()
+	s.mu.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -154,48 +159,42 @@ func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int
 
 // Terminate gracefully or forcefully stops the process.
 func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
-	s.mu.Lock()
-	if s.Status != api.SessionRunning {
-		s.mu.Unlock()
-		return
-	}
-	s.mu.Unlock()
+	s.terminateOnce.Do(func() {
+		if !force {
+			s.execSession.Signal(ssh.SIGTERM)
+			select {
+			case <-s.execSession.Done():
+				return
+			case <-time.After(gracePeriod):
+			}
+		}
 
-	if !force {
-		s.execSession.Signal(ssh.SIGTERM)
+		s.execSession.Close()
+
 		select {
 		case <-s.execSession.Done():
-			return
-		case <-time.After(gracePeriod):
-			// fall through to force kill
+		case <-time.After(2 * time.Second):
 		}
-	}
 
-	s.execSession.Close()
+		s.mu.Lock()
+		if s.Status == api.SessionRunning {
+			s.Status = api.SessionExited
+			code := -1
+			s.ExitCode = &code
+			s.UpdatedAt = time.Now().UTC()
+		}
+		s.mu.Unlock()
 
-	select {
-	case <-s.execSession.Done():
-	case <-time.After(2 * time.Second):
-	}
-
-	s.mu.Lock()
-	if s.Status == api.SessionRunning {
-		s.Status = api.SessionExited
-		code := -1
-		s.ExitCode = &code
-		s.UpdatedAt = time.Now().UTC()
-	}
-	s.mu.Unlock()
-
-	if s.msgMgr != nil {
-		s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated")
-	}
+		if s.msgMgr != nil {
+			s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated")
+		}
+	})
 }
 
 // ResizePty adjusts the terminal dimensions (pty mode only).
 func (s *Session) ResizePty(rows, cols int) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Status != api.SessionRunning {
 		return fmt.Errorf("process not running")
 	}
@@ -215,4 +214,38 @@ func (s *Session) Info() api.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Session
+}
+
+// ReadOutputForReader reads new output for a specific reader ID.
+func (s *Session) ReadOutputForReader(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) string {
+	data, _ := s.buf.Read(readerID, timeout)
+	output := string(data)
+	if stripAnsi {
+		output = ansi.Strip(output)
+	}
+	if maxLines > 0 {
+		lines := strings.Split(output, "\n")
+		if len(lines) > maxLines {
+			output = strings.Join(lines[:maxLines], "\n")
+		}
+	}
+	if output != "" && s.msgMgr != nil {
+		s.msgMgr.Append(s.ID, api.MsgOutput, output)
+	}
+	return output
+}
+
+// RegisterReader creates a new independent reader and returns its ID.
+func (s *Session) RegisterReader() int {
+	return s.buf.NewReader()
+}
+
+// UnregisterReader removes a reader by ID.
+func (s *Session) UnregisterReader(id int) {
+	s.buf.Unregister(id)
+}
+
+// HasMoreOutput returns whether the given reader has unread data.
+func (s *Session) HasMoreOutput(readerID int) bool {
+	return s.buf.HasMore(readerID)
 }
