@@ -109,15 +109,16 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 5.0)
 	maxLines := int(getFloat64(args, "max_lines", 0))
+	readerID := int(getFloat64(args, "reader_id", 0))
 
 	sess := s.sessMgr.Get(sessionID)
 	if sess == nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
 	}
-	output := sess.ReadOutput(time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	result := map[string]any{
 		"output":         output,
-		"has_more":       false,
+		"has_more":       sess.HasMoreOutput(readerID),
 		"lines_returned": strings.Count(output, "\n"),
 		"bytes_returned": len(output),
 	}
@@ -133,6 +134,7 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 5.0)
 	maxLines := int(getFloat64(args, "max_lines", 0))
+	readerID := int(getFloat64(args, "reader_id", 0))
 
 	sess := s.sessMgr.Get(sessionID)
 	if sess == nil {
@@ -142,10 +144,10 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	time.Sleep(100 * time.Millisecond)
-	output := sess.ReadOutput(time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	result := map[string]any{
 		"output":         output,
-		"has_more":       false,
+		"has_more":       sess.HasMoreOutput(readerID),
 		"lines_returned": strings.Count(output, "\n"),
 		"bytes_returned": len(output),
 	}
@@ -234,4 +236,31 @@ func (s *Server) handleGetMessage(ctx context.Context, request mcpgo.CallToolReq
 	result := map[string]any{"messages": messages}
 	data, _ := json.Marshal(result)
 	return mcpgo.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+
+	sess := s.sessMgr.Get(sessionID)
+	if sess == nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	}
+	readerID := sess.RegisterReader()
+	result := map[string]any{"reader_id": readerID}
+	data, _ := json.Marshal(result)
+	return mcpgo.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	readerID := int(getFloat64(args, "reader_id", 0))
+
+	sess := s.sessMgr.Get(sessionID)
+	if sess == nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	}
+	sess.UnregisterReader(readerID)
+	return mcpgo.NewToolResultText(`{"success":true}`), nil
 }

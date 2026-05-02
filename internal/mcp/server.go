@@ -50,6 +50,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
 		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for new output"), mcpgo.DefaultNumber(5)),
 		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
 	), s.handleReadOutput)
 
 	mcpServer.AddTool(mcpgo.NewTool("send_and_read",
@@ -60,6 +61,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
 		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for response"), mcpgo.DefaultNumber(5)),
 		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
+			mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
 	), s.handleSendAndRead)
 
 	mcpServer.AddTool(mcpgo.NewTool("list_sessions",
@@ -95,6 +97,17 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 		mcpgo.WithArray("message_ids", mcpgo.Description("Message IDs to retrieve"), mcpgo.WithStringItems()),
 	), s.handleGetMessage)
+
+	mcpServer.AddTool(mcpgo.NewTool("register_reader",
+		mcpgo.WithDescription("Register a new independent reader for a session's output. Each reader has its own cursor."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+	), s.handleRegisterReader)
+
+	mcpServer.AddTool(mcpgo.NewTool("unregister_reader",
+		mcpgo.WithDescription("Unregister a reader when it is no longer needed"),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Reader ID to unregister")),
+	), s.handleUnregisterReader)
 
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer)
