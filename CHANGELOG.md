@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.1 — 2026-05-02
+
+### Bug Fixes
+
+- **Fixed session lifecycle races**: `Info()` now returns a deep copy of `ExitCode` to prevent data races. `CleanupAll` waits for all sessions to reach exited status before persisting. Reader goroutines properly clean up on terminate via a `done` channel.
+
+- **Fixed error handling gaps**: MCP handlers now validate `mode`, `rows`, `cols`, `timeout`, and `grace_period` parameters. Shared `jsonResult`, `successResult`, and `requireSession` helpers eliminate boilerplate duplication.
+
+- **Fixed message append race**: `Manager.Append` now uses a per-session mutex to prevent concurrent appends from corrupting the message index.
+
+- **Fixed storage atomicity**: All JSON writes use temp-file + fsync + rename to prevent half-written files on crash.
+
+- **Fixed SSH server robustness**: `ProcessState` nil check prevents panic on command-not-found. `started` flag uses `atomic.Bool`. Signal forwarding from client to local process now works in pipe mode. Serve and Setsize errors are logged.
+
+- **Fixed SSH client safety**: `shellQuote` now escapes the command itself. `Close()` closes `Stdin` and returns the first non-nil error. Type assertions use comma-ok pattern.
+
+### Improvements
+
+- **Config validation**: `Validate()` checks port range (1–65535) and non-empty `DataDir`. Default host changed from `0.0.0.0` to `127.0.0.1`.
+
+- **Type safety**: New `SessionMode` type with `ModePTY`/`ModePipe` constants replaces raw string comparisons.
+
 ## v0.2.0 — 2026-05-02
 
 ### New Features
