@@ -68,6 +68,8 @@ func (b *Buffer) ReadNew(timeout time.Duration) string {
 		return ""
 	}
 	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, b.newData.Broadcast)
+	defer timer.Stop()
 	for b.readPos >= b.writePos && !b.closed {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
