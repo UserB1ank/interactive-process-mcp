@@ -63,12 +63,12 @@ func (m *Manager) ListAll() []api.Session {
 }
 
 // Terminate stops a session.
-func (m *Manager) Terminate(id string, force bool, gracePeriod float64) {
+func (m *Manager) Terminate(id string, force bool, gracePeriod time.Duration) {
 	m.mu.RLock()
 	s := m.sessions[id]
 	m.mu.RUnlock()
 	if s != nil {
-		s.Terminate(force, time.Duration(gracePeriod*float64(time.Second)))
+		s.Terminate(force, gracePeriod)
 		m.persist()
 	}
 }
@@ -92,7 +92,7 @@ func (m *Manager) Delete(id string) error {
 	return nil
 }
 
-// CleanupAll terminates all running sessions.
+// CleanupAll terminates all running sessions and waits for them to exit.
 func (m *Manager) CleanupAll(force bool) {
 	m.mu.RLock()
 	list := make([]*Session, 0, len(m.sessions))
@@ -102,6 +102,21 @@ func (m *Manager) CleanupAll(force bool) {
 	m.mu.RUnlock()
 	for _, s := range list {
 		s.Terminate(force, 0)
+	}
+	// Wait for exit goroutines to update status before persisting.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		allExited := true
+		for _, s := range list {
+			if s.Info().Status == api.SessionRunning {
+				allExited = false
+				break
+			}
+		}
+		if allExited {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	m.persist()
 }
