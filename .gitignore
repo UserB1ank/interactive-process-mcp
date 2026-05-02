@@ -19,5 +19,8 @@ testdata/
 .claude/
 docs/superpowers/
 
+# MAC
+.DS_Store
+
 # other program
 templates/
