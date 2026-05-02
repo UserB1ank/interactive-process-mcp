@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -15,12 +16,25 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// Lock ordering: mu -> stdinMu. Never acquire in reverse order.
+
+// Config holds parameters for creating a new Session.
+type Config struct {
+	Command string
+	Args    []string
+	Mode    string
+	Name    string
+	Rows    int
+	Cols    int
+}
+
 // Session wraps an interactive process session managed over SSH.
 type Session struct {
 	api.Session
 	mu            sync.RWMutex
 	stdinMu       sync.Mutex
 	terminateOnce sync.Once
+	exitOnce      sync.Once
 	execSession   *sshclient.ExecSession
 	buf           *buffer.Buffer
 	readerID      int
@@ -29,14 +43,15 @@ type Session struct {
 }
 
 // New creates and starts a new Session.
-func New(sshAddr string, command string, args []string, mode string, name string, rows, cols int, msgMgr *message.Manager) (*Session, error) {
+func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) {
 	id := uuid.New().String()[:12]
+	name := cfg.Name
 	if name == "" {
 		name = fmt.Sprintf("session-%s", id)
 	}
 
-	usePty := mode == "pty"
-	execSession, err := sshclient.Start(sshAddr, command, args, usePty, rows, cols)
+	usePty := cfg.Mode == "pty"
+	execSession, err := sshclient.Start(sshAddr, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
 	if err != nil {
 		return nil, err
 	}
@@ -47,14 +62,14 @@ func New(sshAddr string, command string, args []string, mode string, name string
 		Session: api.Session{
 			ID:        id,
 			Name:      name,
-			Command:   command,
-			Args:      args,
-			Mode:      mode,
+			Command:   cfg.Command,
+			Args:      cfg.Args,
+			Mode:      cfg.Mode,
 			Status:    api.SessionRunning,
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
-			Rows:      rows,
-			Cols:      cols,
+			Rows:      cfg.Rows,
+			Cols:      cfg.Cols,
 		},
 		execSession: execSession,
 		buf:         buf,
@@ -78,7 +93,9 @@ func (s *Session) startReaders() {
 		for {
 			n, err := s.execSession.Stdout.Read(buf)
 			if n > 0 {
-				s.buf.Write(buf[:n])
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				s.buf.Write(data)
 			}
 			if err != nil {
 				break
@@ -91,7 +108,9 @@ func (s *Session) startReaders() {
 		for {
 			n, err := s.execSession.Stderr.Read(buf)
 			if n > 0 {
-				s.buf.Write(buf[:n])
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				s.buf.Write(data)
 			}
 			if err != nil {
 				break
@@ -101,16 +120,18 @@ func (s *Session) startReaders() {
 
 	go func() {
 		<-s.execSession.Done()
-		s.mu.Lock()
-		s.Status = api.SessionExited
-		code := s.execSession.ExitCode()
-		s.ExitCode = &code
-		s.UpdatedAt = time.Now().UTC()
-		s.mu.Unlock()
-		s.buf.Close()
-		if s.msgMgr != nil {
-			s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
-		}
+		s.exitOnce.Do(func() {
+			s.mu.Lock()
+			s.Status = api.SessionExited
+			code := s.execSession.ExitCode()
+			s.ExitCode = &code
+			s.UpdatedAt = time.Now().UTC()
+			s.mu.Unlock()
+			s.buf.Close()
+			if s.msgMgr != nil {
+				s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
+			}
+		})
 	}()
 }
 
@@ -137,9 +158,11 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 	return nil
 }
 
-// ReadOutput reads new output from the buffer.
-func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int) string {
-	data, _ := s.buf.Read(s.readerID, timeout)
+func (s *Session) readOutput(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	data, err := s.buf.Read(readerID, timeout)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
 	output := string(data)
 	if stripAnsi {
 		output = ansi.Strip(output)
@@ -150,14 +173,24 @@ func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int
 			output = strings.Join(lines[:maxLines], "\n")
 		}
 	}
-
 	if output != "" && s.msgMgr != nil {
 		s.msgMgr.Append(s.ID, api.MsgOutput, output)
 	}
-	return output
+	return output, nil
+}
+
+// ReadOutput reads new output using the default reader.
+func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	return s.readOutput(s.readerID, timeout, stripAnsi, maxLines)
+}
+
+// ReadOutputForReader reads new output for a specific reader ID.
+func (s *Session) ReadOutputForReader(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	return s.readOutput(readerID, timeout, stripAnsi, maxLines)
 }
 
 // Terminate gracefully or forcefully stops the process.
+// The exit goroutine is the single authority for final Status/ExitCode.
 func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 	s.terminateOnce.Do(func() {
 		if !force {
@@ -176,18 +209,18 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 		case <-time.After(2 * time.Second):
 		}
 
-		s.mu.Lock()
-		if s.Status == api.SessionRunning {
+		s.exitOnce.Do(func() {
+			s.mu.Lock()
 			s.Status = api.SessionExited
 			code := -1
 			s.ExitCode = &code
 			s.UpdatedAt = time.Now().UTC()
-		}
-		s.mu.Unlock()
-
-		if s.msgMgr != nil {
-			s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated")
-		}
+			s.mu.Unlock()
+			s.buf.Close()
+			if s.msgMgr != nil {
+				s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated (no exit code)")
+			}
+		})
 	})
 }
 
@@ -214,25 +247,6 @@ func (s *Session) Info() api.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Session
-}
-
-// ReadOutputForReader reads new output for a specific reader ID.
-func (s *Session) ReadOutputForReader(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) string {
-	data, _ := s.buf.Read(readerID, timeout)
-	output := string(data)
-	if stripAnsi {
-		output = ansi.Strip(output)
-	}
-	if maxLines > 0 {
-		lines := strings.Split(output, "\n")
-		if len(lines) > maxLines {
-			output = strings.Join(lines[:maxLines], "\n")
-		}
-	}
-	if output != "" && s.msgMgr != nil {
-		s.msgMgr.Append(s.ID, api.MsgOutput, output)
-	}
-	return output
 }
 
 // RegisterReader creates a new independent reader and returns its ID.
