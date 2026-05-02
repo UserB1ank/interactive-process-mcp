@@ -120,3 +120,65 @@ func TestStore_CreatesDirectories(t *testing.T) {
 		t.Fatalf("expected file %q to exist", expected)
 	}
 }
+
+func TestStore_PathTraversalSessionID(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	entries := []api.MessageIndexEntry{{ID: "m1", Type: api.MsgOutput, ByteSize: 1}}
+
+	traversalIDs := []string{
+		"../../etc",
+		"../..",
+		"sess/../../etc",
+		"sess\x00ion",
+		"",
+	}
+	for _, id := range traversalIDs {
+		err := s.SaveMessageIndex(id, entries)
+		if err == nil {
+			t.Fatalf("expected error for sessionID %q, got nil", id)
+		}
+	}
+}
+
+func TestStore_PathTraversalLoadMessage(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	_, err := s.LoadMessage("../../etc/passwd", "m1")
+	if err == nil {
+		t.Fatal("expected error for traversal sessionID")
+	}
+
+	_, err = s.LoadMessage("s1", "../../etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for traversal msgID")
+	}
+}
+
+func TestStore_PathTraversalSaveMessage(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	msg := api.Message{ID: "../../evil", SessionID: "s1", Type: api.MsgOutput, Content: "x"}
+	err := s.SaveMessage("s1", msg)
+	if err == nil {
+		t.Fatal("expected error for traversal msg.ID")
+	}
+
+	msg2 := api.Message{ID: "m1", SessionID: "s1", Type: api.MsgOutput, Content: "x"}
+	err = s.SaveMessage("../../etc", msg2)
+	if err == nil {
+		t.Fatal("expected error for traversal sessionID")
+	}
+}
+
+func TestStore_PathTraversalLoadMessageIndex(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	_, err := s.LoadMessageIndex("../../etc")
+	if err == nil {
+		t.Fatal("expected error for traversal sessionID")
+	}
+}

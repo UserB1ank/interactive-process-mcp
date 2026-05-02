@@ -2,13 +2,27 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 
 	"github.com/mac01/interactive-process-mcp/pkg/api"
 )
+
+var (
+	ErrInvalidID = errors.New("storage: invalid ID")
+	validIDRe    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+)
+
+func validateID(id string) error {
+	if !validIDRe.MatchString(id) {
+		return fmt.Errorf("%w: %q", ErrInvalidID, id)
+	}
+	return nil
+}
 
 // Store handles JSON file persistence for sessions and messages.
 type Store struct {
@@ -23,7 +37,7 @@ func New(dataDir string) *Store {
 
 // initDir ensures the directory exists.
 func (s *Store) initDir(path string) error {
-	return os.MkdirAll(path, 0755)
+	return os.MkdirAll(path, 0700)
 }
 
 // SaveSessions writes the full session list.
@@ -64,6 +78,9 @@ func (s *Store) LoadSessions() ([]api.Session, error) {
 
 // SaveMessageIndex writes the message index for a session.
 func (s *Store) SaveMessageIndex(sessionID string, entries []api.MessageIndexEntry) error {
+	if err := validateID(sessionID); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -81,6 +98,9 @@ func (s *Store) SaveMessageIndex(sessionID string, entries []api.MessageIndexEnt
 
 // LoadMessageIndex reads the message index for a session.
 func (s *Store) LoadMessageIndex(sessionID string) ([]api.MessageIndexEntry, error) {
+	if err := validateID(sessionID); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -101,6 +121,12 @@ func (s *Store) LoadMessageIndex(sessionID string) ([]api.MessageIndexEntry, err
 
 // SaveMessage writes a single message content.
 func (s *Store) SaveMessage(sessionID string, msg api.Message) error {
+	if err := validateID(sessionID); err != nil {
+		return err
+	}
+	if err := validateID(msg.ID); err != nil {
+		return fmt.Errorf("message ID: %w", err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -118,6 +144,12 @@ func (s *Store) SaveMessage(sessionID string, msg api.Message) error {
 
 // LoadMessage reads a single message content.
 func (s *Store) LoadMessage(sessionID, msgID string) (*api.Message, error) {
+	if err := validateID(sessionID); err != nil {
+		return nil, err
+	}
+	if err := validateID(msgID); err != nil {
+		return nil, fmt.Errorf("message ID: %w", err)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

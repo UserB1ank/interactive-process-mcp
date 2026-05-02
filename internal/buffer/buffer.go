@@ -42,22 +42,27 @@ func New(maxBytes int) *Buffer {
 }
 
 // NewReader registers a new independent reader and returns its ID.
-func (b *Buffer) NewReader() int {
+// Returns ErrClosed if the buffer is already closed.
+func (b *Buffer) NewReader() (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return 0, ErrClosed
+	}
 	id := b.nextID
 	b.nextID++
 	rb := ringbuffer.New(b.size)
 	rb.SetOverwrite(true)
 	b.readers[id] = rb
-	return id
+	return id, nil
 }
 
-// Unregister removes a reader by ID.
+// Unregister removes a reader and wakes any goroutines waiting on it.
 func (b *Buffer) Unregister(id int) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	delete(b.readers, id)
+	b.mu.Unlock()
+	b.cond.Broadcast()
 }
 
 // Write appends data to the buffer, broadcasting to all waiting readers.
@@ -89,11 +94,9 @@ func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 		return nil, ErrReader
 	}
 
-	if length := rb.Length(); length > 0 {
-		buf := make([]byte, length)
-		n, _ := rb.Read(buf)
+	if data := b.drain(rb); data != nil {
 		b.mu.Unlock()
-		return buf[:n], nil
+		return data, nil
 	}
 
 	if b.closed {
@@ -107,8 +110,15 @@ func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 	}
 
 	deadline := time.Now().Add(timeout)
-	timer := time.AfterFunc(timeout, b.cond.Broadcast)
-	defer timer.Stop()
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-time.After(time.Until(deadline)):
+			b.cond.Broadcast()
+		case <-stop:
+		}
+	}()
+	defer close(stop)
 
 	for rb.Length() == 0 && !b.closed {
 		if time.Until(deadline) <= 0 {
@@ -116,13 +126,15 @@ func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 			return nil, nil
 		}
 		b.cond.Wait()
+		if _, ok := b.readers[readerID]; !ok {
+			b.mu.Unlock()
+			return nil, ErrReader
+		}
 	}
 
-	if length := rb.Length(); length > 0 {
-		buf := make([]byte, length)
-		n, _ := rb.Read(buf)
+	if data := b.drain(rb); data != nil {
 		b.mu.Unlock()
-		return buf[:n], nil
+		return data, nil
 	}
 
 	b.mu.Unlock()
@@ -130,6 +142,17 @@ func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 		return nil, io.EOF
 	}
 	return nil, nil
+}
+
+// drain reads all available bytes from a ringbuffer. Returns nil if empty.
+// Must be called with b.mu held.
+func (b *Buffer) drain(rb *ringbuffer.RingBuffer) []byte {
+	if length := rb.Length(); length > 0 {
+		buf := make([]byte, length)
+		n, _ := rb.Read(buf)
+		return buf[:n]
+	}
+	return nil
 }
 
 // HasMore returns whether the given reader has unread data.

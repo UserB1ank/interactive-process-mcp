@@ -254,18 +254,28 @@ func TestManager_Delete(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: "pipe", Name: "del-me", Rows: 24, Cols: 80})
+	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"0.1"}, Mode: "pipe", Name: "del-me", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	// Terminate and wait for exited status
+	s.Terminate(true, 0)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Info().Status != api.SessionRunning {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if mgr.Get(s.ID) == nil {
 		t.Fatal("expected session to exist")
 	}
 
-	mgr.Delete(s.ID)
+	if err := mgr.Delete(s.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	if mgr.Get(s.ID) != nil {
 		t.Fatal("expected session to be deleted")
@@ -274,5 +284,26 @@ func TestManager_Delete(t *testing.T) {
 	all := mgr.ListAll()
 	if len(all) != 0 {
 		t.Fatalf("expected 0 sessions after delete, got %d", len(all))
+	}
+}
+
+func TestManager_DeleteRunningSession(t *testing.T) {
+	_, addr := startTestServer(t)
+
+	mgr := NewManager(addr, nil, nil)
+
+	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Terminate(true, 0)
+
+	err = mgr.Delete(s.ID)
+	if err == nil {
+		t.Fatal("expected error when deleting running session")
+	}
+
+	if mgr.Get(s.ID) == nil {
+		t.Fatal("running session should not be removed from registry")
 	}
 }
