@@ -40,6 +40,7 @@ type Session struct {
 	readerID      int
 	msgMgr        *message.Manager
 	sshAddr       string
+	done          chan struct{}
 }
 
 // New creates and starts a new Session.
@@ -77,6 +78,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 		readerID:    rid,
 		msgMgr:      msgMgr,
 		sshAddr:     sshAddr,
+		done:        make(chan struct{}),
 	}
 
 	s.startReaders()
@@ -99,7 +101,12 @@ func (s *Session) startReaders() {
 				s.buf.Write(data)
 			}
 			if err != nil {
-				break
+				return
+			}
+			select {
+			case <-s.done:
+				return
+			default:
 			}
 		}
 	}()
@@ -114,13 +121,19 @@ func (s *Session) startReaders() {
 				s.buf.Write(data)
 			}
 			if err != nil {
-				break
+				return
+			}
+			select {
+			case <-s.done:
+				return
+			default:
 			}
 		}
 	}()
 
 	go func() {
 		<-s.execSession.Done()
+		close(s.done)
 		s.exitOnce.Do(func() {
 			s.mu.Lock()
 			s.Status = api.SessionExited
@@ -243,11 +256,16 @@ func (s *Session) ResizePty(rows, cols int) error {
 	return nil
 }
 
-// Info returns a copy of the session metadata.
+// Info returns a deep copy of the session metadata.
 func (s *Session) Info() api.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Session
+	cp := s.Session
+	if cp.ExitCode != nil {
+		v := *cp.ExitCode
+		cp.ExitCode = &v
+	}
+	return cp
 }
 
 // RegisterReader creates a new independent reader and returns its ID.

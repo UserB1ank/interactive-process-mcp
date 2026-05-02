@@ -193,7 +193,7 @@ func (s *Server) handleTerminateProcess(ctx context.Context, request mcpgo.CallT
 	if sess == nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
 	}
-	s.sessMgr.Terminate(sessionID, force, gracePeriod)
+	s.sessMgr.Terminate(sessionID, force, time.Duration(gracePeriod*float64(time.Second)))
 	return mcpgo.NewToolResultText(`{"success":true}`), nil
 }
 

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,39 @@ import (
 	"github.com/mac01/interactive-process-mcp/internal/sshserver"
 	"github.com/mac01/interactive-process-mcp/pkg/api"
 )
+
+func TestInfo_DeepCopyExitCode(t *testing.T) {
+	_, addr := startTestServer(t)
+
+	s, err := New(addr, Config{Command: "bash", Mode: "pty", Rows: 24, Cols: 80}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.Terminate(true, 0)
+
+	// Wait for exit
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Info().Status != api.SessionRunning {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	info1 := s.Info()
+	info2 := s.Info()
+
+	if info1.ExitCode == nil || info2.ExitCode == nil {
+		t.Fatal("expected ExitCode to be set")
+	}
+	if info1.ExitCode == info2.ExitCode {
+		t.Fatal("Info() should return independent ExitCode pointers")
+	}
+	if *info1.ExitCode != *info2.ExitCode {
+		t.Fatalf("ExitCode values should match: %d vs %d", *info1.ExitCode, *info2.ExitCode)
+	}
+}
 
 func startTestServer(t *testing.T) (*sshserver.Server, string) {
 	t.Helper()
@@ -305,5 +339,33 @@ func TestManager_DeleteRunningSession(t *testing.T) {
 
 	if mgr.Get(s.ID) == nil {
 		t.Fatal("running session should not be removed from registry")
+	}
+}
+
+func TestSession_GoroutinesCleanedUp(t *testing.T) {
+	_, addr := startTestServer(t)
+
+	before := runtime.NumGoroutine()
+
+	s, err := New(addr, Config{Command: "bash", Mode: "pty", Rows: 24, Cols: 80}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.Terminate(true, 0)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Info().Status != api.SessionRunning {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	after := runtime.NumGoroutine()
+	leaked := after - before
+	if leaked > 2 {
+		t.Fatalf("leaked %d goroutines after terminate (before=%d, after=%d)", leaked, before, after)
 	}
 }
