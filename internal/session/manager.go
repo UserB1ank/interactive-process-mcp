@@ -1,12 +1,13 @@
 package session
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
-	"github.com/mac01/interactive-process-mcp/pkg/api"
 	"github.com/mac01/interactive-process-mcp/internal/message"
 	"github.com/mac01/interactive-process-mcp/internal/storage"
+	"github.com/mac01/interactive-process-mcp/pkg/api"
 )
 
 // Manager is a thread-safe registry of sessions with persistence.
@@ -73,16 +74,22 @@ func (m *Manager) Terminate(id string, force bool, gracePeriod float64) {
 }
 
 // Delete removes an exited session from the registry.
-func (m *Manager) Delete(id string) {
+// Returns error if the session is still running.
+func (m *Manager) Delete(id string) error {
 	m.mu.Lock()
 	s := m.sessions[id]
-	if s != nil {
-		delete(m.sessions, id)
+	if s == nil {
+		m.mu.Unlock()
+		return nil
 	}
+	if s.Info().Status == api.SessionRunning {
+		m.mu.Unlock()
+		return fmt.Errorf("cannot delete running session %q, terminate it first", id)
+	}
+	delete(m.sessions, id)
 	m.mu.Unlock()
-	if s != nil {
-		m.persist()
-	}
+	m.persist()
+	return nil
 }
 
 // CleanupAll terminates all running sessions.

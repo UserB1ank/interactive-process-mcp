@@ -18,3 +18,6 @@ testdata/
 # Private (author only)
 .claude/
 docs/superpowers/
+
+# other program
+templates/

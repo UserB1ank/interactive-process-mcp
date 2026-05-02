@@ -10,7 +10,7 @@ import (
 
 func TestBuffer_WriteAndRead(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 
 	b.Write([]byte("hello"))
 	b.Write([]byte(" world"))
@@ -35,7 +35,7 @@ func TestBuffer_WriteAndRead(t *testing.T) {
 
 func TestBuffer_ReadWaitsForData(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 	done := make(chan struct{})
 
 	go func() {
@@ -56,7 +56,7 @@ func TestBuffer_ReadWaitsForData(t *testing.T) {
 
 func TestBuffer_ReadTimeout(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 	start := time.Now()
 	data, err := b.Read(r, 200*time.Millisecond)
 	elapsed := time.Since(start)
@@ -73,7 +73,7 @@ func TestBuffer_ReadTimeout(t *testing.T) {
 
 func TestBuffer_Overwrite(t *testing.T) {
 	b := New(32)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 
 	// Write 48 bytes into 32-byte buffer — first 16 bytes overwritten
 	b.Write([]byte(strings.Repeat("a", 16)))
@@ -98,7 +98,7 @@ func TestBuffer_Overwrite(t *testing.T) {
 
 func TestBuffer_CloseWakesReaders(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 	done := make(chan struct{})
 
 	go func() {
@@ -124,7 +124,7 @@ func TestBuffer_CloseWakesReaders(t *testing.T) {
 
 func TestBuffer_WriteAfterClose(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 	b.Write([]byte("before"))
 	b.Close()
 
@@ -144,7 +144,7 @@ func TestBuffer_WriteAfterClose(t *testing.T) {
 
 func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	b := New(1024 * 1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 	var wg sync.WaitGroup
 
 	for i := 0; i < 5; i++ {
@@ -169,8 +169,8 @@ func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 
 func TestBuffer_MultiReaderIndependence(t *testing.T) {
 	b := New(1024)
-	r1 := b.NewReader()
-	r2 := b.NewReader()
+	r1, _ := b.NewReader()
+	r2, _ := b.NewReader()
 
 	b.Write([]byte("hello"))
 
@@ -193,8 +193,8 @@ func TestBuffer_MultiReaderIndependence(t *testing.T) {
 
 func TestBuffer_MultiReaderSequentialWrite(t *testing.T) {
 	b := New(1024)
-	r1 := b.NewReader()
-	r2 := b.NewReader()
+	r1, _ := b.NewReader()
+	r2, _ := b.NewReader()
 
 	b.Write([]byte("chunk1"))
 	// r1 reads chunk1
@@ -219,7 +219,7 @@ func TestBuffer_MultiReaderSequentialWrite(t *testing.T) {
 
 func TestBuffer_Unregister(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 
 	b.Write([]byte("before"))
 	b.Unregister(r)
@@ -231,9 +231,32 @@ func TestBuffer_Unregister(t *testing.T) {
 	}
 }
 
+func TestBuffer_UnregisterWakesReader(t *testing.T) {
+	b := New(1024)
+	r, _ := b.NewReader()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.Read(r, 10*time.Second)
+		done <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	b.Unregister(r)
+
+	select {
+	case err := <-done:
+		if err != ErrReader {
+			t.Fatalf("expected ErrReader after unregister, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Unregister did not wake the blocked reader")
+	}
+}
+
 func TestBuffer_HasMore(t *testing.T) {
 	b := New(1024)
-	r := b.NewReader()
+	r, _ := b.NewReader()
 
 	if b.HasMore(r) {
 		t.Fatal("expected no data initially")
@@ -255,5 +278,88 @@ func TestBuffer_InvalidReader(t *testing.T) {
 	_, err := b.Read(999, 0)
 	if err != ErrReader {
 		t.Fatalf("expected ErrReader, got %v", err)
+	}
+}
+
+func TestBuffer_NewReaderOnClosed(t *testing.T) {
+	b := New(1024)
+	b.Close()
+	_, err := b.NewReader()
+	if err != ErrClosed {
+		t.Fatalf("expected ErrClosed, got %v", err)
+	}
+}
+
+func TestBuffer_ReadTimeoutReliability(t *testing.T) {
+	// Read must return after timeout even when concurrent Writes cause
+	// the reader to loop between Wait calls while the AfterFunc fires.
+	b := New(1024)
+	r, _ := b.NewReader()
+
+	for i := 0; i < 100; i++ {
+		done := make(chan struct{})
+		go func() {
+			data, err := b.Read(r, 50*time.Millisecond)
+			if err != nil && err != io.EOF {
+				t.Errorf("unexpected error: %v", err)
+			}
+			_ = data
+			close(done)
+		}()
+
+		// Concurrent writes create contention: reader wakes, loops,
+		// competes for lock — widens the race window for AfterFunc.
+		go func() {
+			for j := 0; j < 50; j++ {
+				b.Write([]byte("x"))
+				time.Sleep(time.Millisecond)
+			}
+		}()
+
+		select {
+		case <-done:
+			// good — Read returned within timeout
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Read blocked forever on iteration %d — AfterFunc race", i)
+		}
+	}
+}
+
+func TestBuffer_StressConcurrentReadCloseUnregister(t *testing.T) {
+	b := New(1024)
+	const rounds = 50
+	for i := 0; i < rounds; i++ {
+		r, _ := b.NewReader()
+		var wg sync.WaitGroup
+		wg.Add(3)
+
+		go func() {
+			defer wg.Done()
+			b.Read(r, 100*time.Millisecond)
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				b.Write([]byte("stress"))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			time.Sleep(30 * time.Millisecond)
+			b.Unregister(r)
+		}()
+
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("deadlock in round %d", i)
+		}
+
+		// Reset buffer for next round
+		b.Close()
+		b = New(1024)
 	}
 }

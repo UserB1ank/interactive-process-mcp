@@ -200,15 +200,13 @@ func (s *Server) handleTerminateProcess(ctx context.Context, request mcpgo.CallT
 func (s *Server) handleDeleteSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
+	if sessionID == "" {
+		return mcpgo.NewToolResultError("session_id is required"), nil
+	}
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	if err := s.sessMgr.Delete(sessionID); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	if sess.Info().Status == "running" {
-		return mcpgo.NewToolResultError("cannot delete a running session, terminate it first"), nil
-	}
-	s.sessMgr.Delete(sessionID)
 	return mcpgo.NewToolResultText(`{"success":true}`), nil
 }
 
@@ -269,7 +267,10 @@ func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToo
 	if sess == nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
 	}
-	readerID := sess.RegisterReader()
+	readerID, err := sess.RegisterReader()
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	result := map[string]any{"reader_id": readerID}
 	data, _ := json.Marshal(result)
 	return mcpgo.NewToolResultText(string(data)), nil

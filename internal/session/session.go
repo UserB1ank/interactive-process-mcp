@@ -57,6 +57,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 	}
 
 	buf := buffer.New(1024 * 1024)
+	rid, _ := buf.NewReader()
 
 	s := &Session{
 		Session: api.Session{
@@ -73,7 +74,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 		},
 		execSession: execSession,
 		buf:         buf,
-		readerID:    buf.NewReader(),
+		readerID:    rid,
 		msgMgr:      msgMgr,
 		sshAddr:     sshAddr,
 	}
@@ -138,8 +139,9 @@ func (s *Session) startReaders() {
 // SendInput writes text to the process stdin.
 func (s *Session) SendInput(text string, pressEnter bool) error {
 	s.mu.RLock()
-	if s.Status != api.SessionRunning {
-		s.mu.RUnlock()
+	running := s.Status == api.SessionRunning
+	s.mu.RUnlock()
+	if !running {
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
 	if pressEnter {
@@ -148,7 +150,6 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 	s.stdinMu.Lock()
 	_, err := s.execSession.Stdin.Write([]byte(text))
 	s.stdinMu.Unlock()
-	s.mu.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -250,7 +251,7 @@ func (s *Session) Info() api.Session {
 }
 
 // RegisterReader creates a new independent reader and returns its ID.
-func (s *Session) RegisterReader() int {
+func (s *Session) RegisterReader() (int, error) {
 	return s.buf.NewReader()
 }
 
