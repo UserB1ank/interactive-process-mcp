@@ -1,6 +1,8 @@
 package message
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/mac01/interactive-process-mcp/internal/storage"
@@ -70,6 +72,30 @@ func TestManager_GetMany(t *testing.T) {
 	}
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+}
+
+func TestManager_AppendRace(t *testing.T) {
+	dir := t.TempDir()
+	store := storage.New(dir)
+	mgr := NewManager(store)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			mgr.Append("s1", api.MsgInput, fmt.Sprintf("msg-%d", n))
+		}(i)
+	}
+	wg.Wait()
+
+	entries, err := mgr.List("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 10 {
+		t.Fatalf("expected 10 entries, got %d", len(entries))
 	}
 }
 

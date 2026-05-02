@@ -1,6 +1,7 @@
 package message
 
 import (
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,12 +11,25 @@ import (
 
 // Manager handles persistence of session messages.
 type Manager struct {
-	store *storage.Store
+	store   *storage.Store
+	mu      sync.Mutex
+	session map[string]*sync.Mutex
 }
 
 // NewManager creates a Manager backed by the given Store.
 func NewManager(store *storage.Store) *Manager {
-	return &Manager{store: store}
+	return &Manager{store: store, session: make(map[string]*sync.Mutex)}
+}
+
+func (m *Manager) sessionLock(sessionID string) *sync.Mutex {
+	m.mu.Lock()
+	mu, ok := m.session[sessionID]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.session[sessionID] = mu
+	}
+	m.mu.Unlock()
+	return mu
 }
 
 // Append records a new message and persists it.
@@ -31,6 +45,11 @@ func (m *Manager) Append(sessionID string, typ api.MsgType, content string) (*ap
 	if err := m.store.SaveMessage(sessionID, msg); err != nil {
 		return nil, err
 	}
+
+	mu := m.sessionLock(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	entries, err := m.store.LoadMessageIndex(sessionID)
 	if err != nil {
 		entries = []api.MessageIndexEntry{}
