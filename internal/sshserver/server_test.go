@@ -60,6 +60,31 @@ func TestServer_PipeSession(t *testing.T) {
 	}
 }
 
+func TestServer_ProcessStateNil(t *testing.T) {
+	srv := New("127.0.0.1:0")
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+
+	config := ClientConfig()
+	client, err := ssh.Dial("tcp", srv.Addr(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	// Run a nonexistent command — ProcessState will be nil
+	out, _ := session.CombinedOutput("this_command_does_not_exist_12345")
+	_ = out // server should not panic
+}
+
 func TestServer_PtySession(t *testing.T) {
 	srv := New("127.0.0.1:0")
 	if err := srv.Start(); err != nil {

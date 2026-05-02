@@ -22,7 +22,7 @@ import (
 type Config struct {
 	Command string
 	Args    []string
-	Mode    string
+	Mode    api.SessionMode
 	Name    string
 	Rows    int
 	Cols    int
@@ -51,7 +51,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 		name = fmt.Sprintf("session-%s", id)
 	}
 
-	usePty := cfg.Mode == "pty"
+	usePty := cfg.Mode == api.ModePTY
 	execSession, err := sshclient.Start(sshAddr, cfg.Command, cfg.Args, usePty, cfg.Rows, cfg.Cols)
 	if err != nil {
 		return nil, err
@@ -245,7 +245,7 @@ func (s *Session) ResizePty(rows, cols int) error {
 	if s.Status != api.SessionRunning {
 		return fmt.Errorf("process not running")
 	}
-	if s.Mode != "pty" {
+	if s.Mode != api.ModePTY {
 		return fmt.Errorf("PTY resize only available in pty mode")
 	}
 	if err := s.execSession.ResizePty(rows, cols); err != nil {

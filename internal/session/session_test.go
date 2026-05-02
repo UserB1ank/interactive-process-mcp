@@ -13,7 +13,7 @@ import (
 func TestInfo_DeepCopyExitCode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: "bash", Mode: "pty", Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: "bash", Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func startTestServer(t *testing.T) (*sshserver.Server, string) {
 	return srv, srv.Addr()
 }
 
-func testConfig(command string, args []string, mode string, name string) Config {
+func testConfig(command string, args []string, mode api.SessionMode, name string) Config {
 	return Config{
 		Command: command,
 		Args:    args,
@@ -67,7 +67,7 @@ func testConfig(command string, args []string, mode string, name string) Config 
 func TestSession_CreateAndInfo(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, "pty", "test-session"), nil)
+	s, err := New(addr, testConfig("bash", nil, api.ModePTY, "test-session"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestSession_CreateAndInfo(t *testing.T) {
 	if info.Status != api.SessionRunning {
 		t.Fatalf("expected status 'running', got %q", info.Status)
 	}
-	if info.Mode != "pty" {
+	if info.Mode != api.ModePTY {
 		t.Fatalf("expected mode 'pty', got %q", info.Mode)
 	}
 }
@@ -91,7 +91,7 @@ func TestSession_CreateAndInfo(t *testing.T) {
 func TestSession_SendInputReadOutput(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
+	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 func TestSession_Terminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("sleep", []string{"60"}, "pipe", ""), nil)
+	s, err := New(addr, testConfig("sleep", []string{"60"}, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSession_Terminate(t *testing.T) {
 func TestSession_ForceTerminate(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("sleep", []string{"60"}, "pipe", ""), nil)
+	s, err := New(addr, testConfig("sleep", []string{"60"}, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestSession_ForceTerminate(t *testing.T) {
 func TestSession_ResizePty(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
+	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestSession_ResizePty(t *testing.T) {
 func TestSession_ResizePtyPipeMode(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("cat", nil, "pipe", ""), nil)
+	s, err := New(addr, testConfig("cat", nil, api.ModePipe, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestSession_ResizePtyPipeMode(t *testing.T) {
 func TestSession_SendInputAfterExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, testConfig("bash", nil, "pty", ""), nil)
+	s, err := New(addr, testConfig("bash", nil, api.ModePTY, ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestSession_SendInputAfterExit(t *testing.T) {
 func TestSession_NaturalExit(t *testing.T) {
 	_, addr := startTestServer(t)
 
-	s, err := New(addr, Config{Command: "bash", Args: []string{"-c", "echo hello"}, Mode: "pty", Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: "bash", Args: []string{"-c", "echo hello"}, Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestManager_CreateAndGet(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: "pipe", Name: "test", Rows: 24, Cols: 80})
+	s, err := mgr.Create(Config{Command: "echo", Args: []string{"hi"}, Mode: api.ModePipe, Name: "test", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,8 +255,8 @@ func TestManager_ListAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create(Config{Command: "echo", Args: []string{"a"}, Mode: "pipe", Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: "echo", Args: []string{"b"}, Mode: "pipe", Name: "s2", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "echo", Args: []string{"a"}, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "echo", Args: []string{"b"}, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
 
 	all := mgr.ListAll()
 	if len(all) != 2 {
@@ -269,8 +269,8 @@ func TestManager_CleanupAll(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Name: "s1", Rows: 24, Cols: 80})
-	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Name: "s2", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Name: "s1", Rows: 24, Cols: 80})
+	mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Name: "s2", Rows: 24, Cols: 80})
 
 	mgr.CleanupAll(true)
 
@@ -288,7 +288,7 @@ func TestManager_Delete(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"0.1"}, Mode: "pipe", Name: "del-me", Rows: 24, Cols: 80})
+	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"0.1"}, Mode: api.ModePipe, Name: "del-me", Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestManager_DeleteRunningSession(t *testing.T) {
 
 	mgr := NewManager(addr, nil, nil)
 
-	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: "pipe", Rows: 24, Cols: 80})
+	s, err := mgr.Create(Config{Command: "sleep", Args: []string{"60"}, Mode: api.ModePipe, Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestSession_GoroutinesCleanedUp(t *testing.T) {
 
 	before := runtime.NumGoroutine()
 
-	s, err := New(addr, Config{Command: "bash", Mode: "pty", Rows: 24, Cols: 80}, nil)
+	s, err := New(addr, Config{Command: "bash", Mode: api.ModePTY, Rows: 24, Cols: 80}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

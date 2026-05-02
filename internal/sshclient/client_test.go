@@ -89,6 +89,7 @@ func TestStart_Signal(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	time.Sleep(200 * time.Millisecond) // let server process start
 	if err := es.Signal("TERM"); err != nil {
 		t.Fatalf("Signal failed: %v", err)
 	}
@@ -118,6 +119,26 @@ func TestStart_Close(t *testing.T) {
 	case <-es.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("process did not exit after close")
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		args []string
+		want string
+	}{
+		{"echo", []string{"hello"}, `echo hello`},
+		{"echo hello", nil, `"echo hello"`},
+		{"echo", []string{"a b"}, `echo "a b"`},
+		{"echo", []string{`a"b`}, `echo "a\"b"`},
+		{"my command", []string{"arg"}, `"my command" arg`},
+	}
+	for _, tc := range tests {
+		got := shellQuote(tc.cmd, tc.args)
+		if got != tc.want {
+			t.Fatalf("shellQuote(%q, %v) = %q, want %q", tc.cmd, tc.args, got, tc.want)
+		}
 	}
 }
 

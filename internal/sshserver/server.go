@@ -7,8 +7,12 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"os"
 	"os/exec"
+	"sync/atomic"
+	"syscall"
 
 	"github.com/creack/pty"
 	gliderssh "github.com/gliderlabs/ssh"
@@ -22,7 +26,7 @@ type Server struct {
 	addr     string
 	server   *gliderssh.Server
 	listener net.Listener
-	started  bool
+	started  atomic.Bool
 }
 
 // New creates an internal SSH server listening on addr.
@@ -70,11 +74,11 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	s.listener = ln
-	s.started = true
+	s.started.Store(true)
 
 	go func() {
 		if err := s.server.Serve(ln); err != nil {
-			// Server closed
+			log.Printf("SSH server stopped: %v", err)
 		}
 	}()
 	return nil
@@ -82,10 +86,25 @@ func (s *Server) Start() error {
 
 // Stop shuts down the SSH server.
 func (s *Server) Stop() error {
-	if !s.started {
+	if !s.started.Load() {
 		return nil
 	}
 	return s.server.Close()
+}
+
+func sshSignalToOSSig(sig gliderssh.Signal) os.Signal {
+	switch sig {
+	case "TERM":
+		return syscall.SIGTERM
+	case "INT":
+		return syscall.SIGINT
+	case "KILL":
+		return syscall.SIGKILL
+	case "HUP":
+		return syscall.SIGHUP
+	default:
+		return nil
+	}
 }
 
 func (s *Server) handleSession(sess gliderssh.Session) {
@@ -100,6 +119,20 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 
+	// Forward signals from client to local process.
+	sigCh := make(chan gliderssh.Signal, 8)
+	sess.Signals(sigCh)
+	go func() {
+		for sig := range sigCh {
+			if cmd.Process != nil {
+				if osSig := sshSignalToOSSig(sig); osSig != nil {
+					cmd.Process.Signal(osSig)
+				}
+			}
+		}
+	}()
+
+	var exitCode int
 	if isPty {
 		f, err := pty.StartWithSize(cmd, &pty.Winsize{
 			Rows: uint16(ptyReq.Window.Height),
@@ -114,10 +147,12 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 
 		go func() {
 			for win := range winCh {
-				pty.Setsize(f, &pty.Winsize{
+				if err := pty.Setsize(f, &pty.Winsize{
 					Rows: uint16(win.Height),
 					Cols: uint16(win.Width),
-				})
+				}); err != nil {
+					log.Printf("Setsize error: %v", err)
+				}
 			}
 		}()
 
@@ -132,7 +167,12 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 		cmd.Run()
 	}
 
-	sess.Exit(cmd.ProcessState.ExitCode())
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	} else {
+		exitCode = 127 // command not found
+	}
+	sess.Exit(exitCode)
 }
 
 func generateHostKeyPEM() ([]byte, error) {

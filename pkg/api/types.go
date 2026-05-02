@@ -13,13 +13,21 @@ const (
 	SessionError   SessionStatus = "error"
 )
 
+// SessionMode represents the execution mode for a session.
+type SessionMode string
+
+const (
+	ModePTY  SessionMode = "pty"
+	ModePipe SessionMode = "pipe"
+)
+
 // Session holds metadata for an interactive process session.
 type Session struct {
 	ID        string        `json:"id"`
 	Name      string        `json:"name"`
 	Command   string        `json:"command"`
 	Args      []string      `json:"args"`
-	Mode      string        `json:"mode"`     // "pty" | "pipe"
+	Mode      SessionMode   `json:"mode"`     // "pty" | "pipe"
 	Status    SessionStatus `json:"status"`   // running | exited | error
 	ExitCode  *int          `json:"exit_code"`
 	PID       int           `json:"pid"`

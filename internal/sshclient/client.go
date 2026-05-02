@@ -25,6 +25,12 @@ type ExecSession struct {
 // Start connects to the internal SSH server and starts a command.
 // addr is the SSH server address (e.g. "127.0.0.1:2222").
 // If pty is true, a pseudo-terminal is requested with the given dimensions.
+func closeIfCloser(r io.Reader) {
+	if c, ok := r.(io.Closer); ok {
+		c.Close()
+	}
+}
+
 func Start(addr string, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
 	config := sshserver.ClientConfig()
 	client, err := ssh.Dial("tcp", addr, config)
@@ -55,7 +61,7 @@ func Start(addr string, command string, args []string, pty bool, rows, cols int)
 
 	stderr, err := session.StderrPipe()
 	if err != nil {
-		stdout.(io.Closer).Close()
+		closeIfCloser(stdout)
 		stdin.Close()
 		session.Close()
 		client.Close()
@@ -69,8 +75,8 @@ func Start(addr string, command string, args []string, pty bool, rows, cols int)
 			ssh.TTY_OP_OSPEED: 14400,
 		}
 		if err := session.RequestPty("xterm-256color", rows, cols, modes); err != nil {
-			stderr.(io.Closer).Close()
-			stdout.(io.Closer).Close()
+			closeIfCloser(stderr)
+			closeIfCloser(stdout)
 			stdin.Close()
 			session.Close()
 			client.Close()
@@ -80,8 +86,8 @@ func Start(addr string, command string, args []string, pty bool, rows, cols int)
 
 	cmdStr := shellQuote(command, args)
 	if err := session.Start(cmdStr); err != nil {
-		stderr.(io.Closer).Close()
-		stdout.(io.Closer).Close()
+		closeIfCloser(stderr)
+		closeIfCloser(stdout)
 		stdin.Close()
 		session.Close()
 		client.Close()
@@ -132,20 +138,29 @@ func (es *ExecSession) Signal(sig ssh.Signal) error {
 
 // Close forcefully terminates the session and underlying connection.
 func (es *ExecSession) Close() error {
-	es.session.Close()
-	es.client.Close()
-	return nil
+	es.Stdin.Close()
+	var firstErr error
+	if err := es.session.Close(); err != nil {
+		firstErr = err
+	}
+	if err := es.client.Close(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
 
 // shellQuote builds a shell-safe command string.
 func shellQuote(command string, args []string) string {
-	parts := []string{command}
+	parts := []string{quoteIfNeeded(command)}
 	for _, a := range args {
-		if strings.ContainsAny(a, " \t\n\"'\\$|&;<>(){}[]*?#~`") {
-			parts = append(parts, strconv.Quote(a))
-		} else {
-			parts = append(parts, a)
-		}
+		parts = append(parts, quoteIfNeeded(a))
 	}
 	return strings.Join(parts, " ")
+}
+
+func quoteIfNeeded(s string) string {
+	if strings.ContainsAny(s, " \t\n\"'\\$|&;<>(){}[]*?#~`") {
+		return strconv.Quote(s)
+	}
+	return s
 }
