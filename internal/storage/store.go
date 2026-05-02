@@ -40,6 +40,34 @@ func (s *Store) initDir(path string) error {
 	return os.MkdirAll(path, 0700)
 }
 
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Chmod(tmp, perm); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // SaveSessions writes the full session list.
 func (s *Store) SaveSessions(sessions []api.Session) error {
 	s.mu.Lock()
@@ -53,7 +81,7 @@ func (s *Store) SaveSessions(sessions []api.Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return atomicWriteFile(path, data, 0644)
 }
 
 // LoadSessions reads the full session list.
@@ -93,7 +121,7 @@ func (s *Store) SaveMessageIndex(sessionID string, entries []api.MessageIndexEnt
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return atomicWriteFile(path, data, 0644)
 }
 
 // LoadMessageIndex reads the message index for a session.
@@ -139,7 +167,7 @@ func (s *Store) SaveMessage(sessionID string, msg api.Message) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return atomicWriteFile(path, data, 0644)
 }
 
 // LoadMessage reads a single message content.

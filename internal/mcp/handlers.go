@@ -43,6 +43,39 @@ func getFloat64(args map[string]any, key string, def float64) float64 {
 	return def
 }
 
+func validateStartParams(args map[string]any) (*mcpgo.CallToolResult, error) {
+	mode := getString(args, "mode", "pty")
+	if mode != "pty" && mode != "pipe" {
+		return mcpgo.NewToolResultError(fmt.Sprintf("mode must be 'pty' or 'pipe', got %q", mode)), nil
+	}
+	rows := int(getFloat64(args, "rows", 24))
+	if rows < 1 || rows > 1000 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("rows must be between 1 and 1000, got %d", rows)), nil
+	}
+	cols := int(getFloat64(args, "cols", 80))
+	if cols < 1 || cols > 1000 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("cols must be between 1 and 1000, got %d", cols)), nil
+	}
+	return nil, nil
+}
+
+func jsonResult(data map[string]any) *mcpgo.CallToolResult {
+	b, _ := json.Marshal(data)
+	return mcpgo.NewToolResultText(string(b))
+}
+
+func successResult() *mcpgo.CallToolResult {
+	return mcpgo.NewToolResultText(`{"success":true}`)
+}
+
+func (s *Server) requireSession(sessionID string) (*session.Session, *mcpgo.CallToolResult) {
+	sess := s.sessMgr.Get(sessionID)
+	if sess == nil {
+		return nil, mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID))
+	}
+	return sess, nil
+}
+
 func getStringSlice(args map[string]any, key string) []string {
 	if v, ok := args[key]; ok {
 		if arr, ok := v.([]any); ok {
@@ -63,6 +96,9 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 	command := getString(args, "command", "")
 	if command == "" {
 		return mcpgo.NewToolResultError("command is required"), nil
+	}
+	if bad, _ := validateStartParams(args); bad != nil {
+		return bad, nil
 	}
 
 	sess, err := s.sessMgr.Create(session.Config{
@@ -85,8 +121,7 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 		"pid":            sess.PID,
 		"initial_output": initial,
 	}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleSendInput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -95,14 +130,14 @@ func (s *Server) handleSendInput(ctx context.Context, request mcpgo.CallToolRequ
 	text := getString(args, "text", "")
 	pressEnter := getBool(args, "press_enter", false)
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	if err := sess.SendInput(text, pressEnter); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	return mcpgo.NewToolResultText(`{"success":true}`), nil
+	return successResult(), nil
 }
 
 func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -110,12 +145,15 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	sessionID := getString(args, "session_id", "")
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 5.0)
+	if timeout < 0.1 || timeout > 60 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
+	}
 	maxLines := int(getFloat64(args, "max_lines", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	output, err := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	if err != nil {
@@ -127,8 +165,7 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 		"lines_returned": strings.Count(output, "\n"),
 		"bytes_returned": len(output),
 	}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -138,12 +175,15 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	pressEnter := getBool(args, "press_enter", false)
 	stripAnsi := getBool(args, "strip_ansi", true)
 	timeout := getFloat64(args, "timeout", 5.0)
+	if timeout < 0.1 || timeout > 60 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("timeout must be between 0.1 and 60, got %v", timeout)), nil
+	}
 	maxLines := int(getFloat64(args, "max_lines", 0))
 	readerID := int(getFloat64(args, "reader_id", 0))
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	if err := sess.SendInput(text, pressEnter); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -159,24 +199,22 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 		"lines_returned": strings.Count(output, "\n"),
 		"bytes_returned": len(output),
 	}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleListSessions(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	sessions := s.sessMgr.ListAll()
 	result := map[string]any{"sessions": sessions}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleGetSessionInfo(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	info := sess.Info()
 	data, _ := json.Marshal(info)
@@ -188,13 +226,16 @@ func (s *Server) handleTerminateProcess(ctx context.Context, request mcpgo.CallT
 	sessionID := getString(args, "session_id", "")
 	force := getBool(args, "force", false)
 	gracePeriod := getFloat64(args, "grace_period", 5.0)
+	if gracePeriod < 0 || gracePeriod > 60 {
+		return mcpgo.NewToolResultError(fmt.Sprintf("grace_period must be between 0 and 60, got %v", gracePeriod)), nil
+	}
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	_, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	s.sessMgr.Terminate(sessionID, force, time.Duration(gracePeriod*float64(time.Second)))
-	return mcpgo.NewToolResultText(`{"success":true}`), nil
+	return successResult(), nil
 }
 
 func (s *Server) handleDeleteSession(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -207,7 +248,7 @@ func (s *Server) handleDeleteSession(ctx context.Context, request mcpgo.CallTool
 	if err := s.sessMgr.Delete(sessionID); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	return mcpgo.NewToolResultText(`{"success":true}`), nil
+	return successResult(), nil
 }
 
 func (s *Server) handleResizePty(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -216,14 +257,14 @@ func (s *Server) handleResizePty(ctx context.Context, request mcpgo.CallToolRequ
 	rows := int(getFloat64(args, "rows", 24))
 	cols := int(getFloat64(args, "cols", 80))
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	if err := sess.ResizePty(rows, cols); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	return mcpgo.NewToolResultText(`{"success":true}`), nil
+	return successResult(), nil
 }
 
 func (s *Server) handleListMessages(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -235,8 +276,7 @@ func (s *Server) handleListMessages(ctx context.Context, request mcpgo.CallToolR
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	result := map[string]any{"messages": entries}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleGetMessage(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -255,25 +295,23 @@ func (s *Server) handleGetMessage(ctx context.Context, request mcpgo.CallToolReq
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	result := map[string]any{"messages": messages}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleRegisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	readerID, err := sess.RegisterReader()
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	result := map[string]any{"reader_id": readerID}
-	data, _ := json.Marshal(result)
-	return mcpgo.NewToolResultText(string(data)), nil
+	return jsonResult(result), nil
 }
 
 func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -281,10 +319,10 @@ func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallT
 	sessionID := getString(args, "session_id", "")
 	readerID := int(getFloat64(args, "reader_id", 0))
 
-	sess := s.sessMgr.Get(sessionID)
-	if sess == nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("Session '%s' not found", sessionID)), nil
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
 	}
 	sess.UnregisterReader(readerID)
-	return mcpgo.NewToolResultText(`{"success":true}`), nil
+	return successResult(), nil
 }

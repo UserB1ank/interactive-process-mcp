@@ -234,3 +234,77 @@ func TestHandleListMessages(t *testing.T) {
 		t.Fatal("expected at least one message")
 	}
 }
+
+func TestHandleStartProcess_InvalidMode(t *testing.T) {
+	s := newTestServer(t)
+	for _, mode := range []string{"websocket", "", "PIPE"} {
+		req := makeRequest(map[string]any{
+			"command": "echo",
+			"mode":    mode,
+		})
+		result, _ := s.handleStartProcess(context.Background(), req)
+		if !result.IsError {
+			t.Fatalf("expected error for mode %q", mode)
+		}
+	}
+}
+
+func TestHandleStartProcess_InvalidRowsCols(t *testing.T) {
+	s := newTestServer(t)
+	for _, tc := range []struct {
+		rows float64
+		cols float64
+	}{
+		{0, 80}, {-1, 80}, {24, 0}, {24, -5}, {1001, 80},
+	} {
+		req := makeRequest(map[string]any{
+			"command": "echo",
+			"mode":    "pty",
+			"rows":    tc.rows,
+			"cols":    tc.cols,
+		})
+		result, _ := s.handleStartProcess(context.Background(), req)
+		if !result.IsError {
+			t.Fatalf("expected error for rows=%v cols=%v", tc.rows, tc.cols)
+		}
+	}
+}
+
+func TestHandleReadOutput_InvalidTimeout(t *testing.T) {
+	s := newTestServer(t)
+	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
+	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	for _, timeout := range []float64{-1, 0.001, 61, 999} {
+		req := makeRequest(map[string]any{
+			"session_id": sessionID,
+			"timeout":    timeout,
+		})
+		result, _ := s.handleReadOutput(context.Background(), req)
+		if !result.IsError {
+			t.Fatalf("expected error for timeout %v", timeout)
+		}
+	}
+}
+
+func TestHandleTerminateProcess_InvalidGracePeriod(t *testing.T) {
+	s := newTestServer(t)
+
+	startReq := makeRequest(map[string]any{"command": "echo", "mode": "pipe"})
+	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	for _, gp := range []float64{-1, 61, 3600} {
+		req := makeRequest(map[string]any{
+			"session_id":   sessionID,
+			"grace_period": gp,
+		})
+		result, _ := s.handleTerminateProcess(context.Background(), req)
+		if !result.IsError {
+			t.Fatalf("expected error for grace_period %v", gp)
+		}
+	}
+}
