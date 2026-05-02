@@ -21,6 +21,7 @@ type Session struct {
 	mu          sync.RWMutex
 	execSession *sshclient.ExecSession
 	buf         *buffer.Buffer
+	readerID    int
 	msgMgr      *message.Manager
 	sshAddr     string
 }
@@ -38,6 +39,8 @@ func New(sshAddr string, command string, args []string, mode string, name string
 		return nil, err
 	}
 
+	buf := buffer.New(1024 * 1024)
+
 	s := &Session{
 		Session: api.Session{
 			ID:        id,
@@ -52,7 +55,8 @@ func New(sshAddr string, command string, args []string, mode string, name string
 			Cols:      cols,
 		},
 		execSession: execSession,
-		buf:         buffer.New(1024 * 1024),
+		buf:         buf,
+		readerID:    buf.NewReader(),
 		msgMgr:      msgMgr,
 		sshAddr:     sshAddr,
 	}
@@ -72,7 +76,7 @@ func (s *Session) startReaders() {
 		for {
 			n, err := s.execSession.Stdout.Read(buf)
 			if n > 0 {
-				s.buf.Write(string(buf[:n]))
+				s.buf.Write(buf[:n])
 			}
 			if err != nil {
 				break
@@ -85,7 +89,7 @@ func (s *Session) startReaders() {
 		for {
 			n, err := s.execSession.Stderr.Read(buf)
 			if n > 0 {
-				s.buf.Write(string(buf[:n]))
+				s.buf.Write(buf[:n])
 			}
 			if err != nil {
 				break
@@ -130,7 +134,8 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 
 // ReadOutput reads new output from the buffer.
 func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int) string {
-	output := s.buf.ReadNew(timeout)
+	data, _ := s.buf.Read(s.readerID, timeout)
+	output := string(data)
 	if stripAnsi {
 		output = ansi.Strip(output)
 	}

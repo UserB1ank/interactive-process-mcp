@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -9,76 +10,104 @@ import (
 
 func TestBuffer_WriteAndRead(t *testing.T) {
 	b := New(1024)
-	b.Write("hello")
-	b.Write(" world")
+	r := b.NewReader()
 
-	got := b.ReadNew(time.Second)
-	if got != "hello world" {
-		t.Fatalf("expected 'hello world', got %q", got)
+	b.Write([]byte("hello"))
+	b.Write([]byte(" world"))
+
+	data, err := b.Read(r, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello world" {
+		t.Fatalf("expected 'hello world', got %q", string(data))
 	}
 
 	// Second read with no new data should return empty immediately
-	got = b.ReadNew(0)
-	if got != "" {
-		t.Fatalf("expected empty, got %q", got)
+	data, err = b.Read(r, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected empty, got %q", string(data))
 	}
 }
 
-func TestBuffer_ReadNewWaitsForData(t *testing.T) {
+func TestBuffer_ReadWaitsForData(t *testing.T) {
 	b := New(1024)
+	r := b.NewReader()
 	done := make(chan struct{})
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		b.Write("delayed")
+		b.Write([]byte("delayed"))
 		close(done)
 	}()
 
-	got := b.ReadNew(2 * time.Second)
-	if got != "delayed" {
-		t.Fatalf("expected 'delayed', got %q", got)
+	data, err := b.Read(r, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "delayed" {
+		t.Fatalf("expected 'delayed', got %q", string(data))
 	}
 	<-done
 }
 
-func TestBuffer_ReadNewTimeout(t *testing.T) {
+func TestBuffer_ReadTimeout(t *testing.T) {
 	b := New(1024)
+	r := b.NewReader()
 	start := time.Now()
-	got := b.ReadNew(200 * time.Millisecond)
+	data, err := b.Read(r, 200*time.Millisecond)
 	elapsed := time.Since(start)
-	if got != "" {
-		t.Fatalf("expected empty, got %q", got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected empty, got %q", string(data))
 	}
 	if elapsed < 150*time.Millisecond {
 		t.Fatalf("returned too fast: %v", elapsed)
 	}
 }
 
-func TestBuffer_RingEviction(t *testing.T) {
+func TestBuffer_Overwrite(t *testing.T) {
 	b := New(32)
-	// Write 3 chunks of 16 bytes each — should evict the first one
-	b.Write(strings.Repeat("a", 16))
-	b.Write(strings.Repeat("b", 16))
-	b.Write(strings.Repeat("c", 16))
+	r := b.NewReader()
 
-	got := b.ReadNew(time.Second)
-	// First chunk should be evicted; we get b's + c's
-	if !strings.Contains(got, strings.Repeat("b", 16)) {
-		t.Fatalf("expected 'b' chunk to survive, got %q", got)
+	// Write 48 bytes into 32-byte buffer — first 16 bytes overwritten
+	b.Write([]byte(strings.Repeat("a", 16)))
+	b.Write([]byte(strings.Repeat("b", 16)))
+	b.Write([]byte(strings.Repeat("c", 16)))
+
+	data, err := b.Read(r, time.Second)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(got, strings.Repeat("c", 16)) {
-		t.Fatalf("expected 'c' chunk to survive, got %q", got)
+	s := string(data)
+	if strings.Contains(s, strings.Repeat("a", 16)) {
+		t.Fatal("expected 'a' chunk to be overwritten")
+	}
+	if !strings.Contains(s, strings.Repeat("b", 16)) {
+		t.Fatalf("expected 'b' chunk to survive, got %q", s)
+	}
+	if !strings.Contains(s, strings.Repeat("c", 16)) {
+		t.Fatalf("expected 'c' chunk to survive, got %q", s)
 	}
 }
 
 func TestBuffer_CloseWakesReaders(t *testing.T) {
 	b := New(1024)
+	r := b.NewReader()
 	done := make(chan struct{})
 
 	go func() {
-		got := b.ReadNew(10 * time.Second)
-		if got != "" {
-			t.Errorf("expected empty on close, got %q", got)
+		data, err := b.Read(r, 10*time.Second)
+		if len(data) != 0 {
+			t.Errorf("expected empty on close, got %q", string(data))
+		}
+		if err != io.EOF {
+			t.Errorf("expected io.EOF, got %v", err)
 		}
 		close(done)
 	}()
@@ -95,55 +124,136 @@ func TestBuffer_CloseWakesReaders(t *testing.T) {
 
 func TestBuffer_WriteAfterClose(t *testing.T) {
 	b := New(1024)
-	b.Write("before")
+	r := b.NewReader()
+	b.Write([]byte("before"))
 	b.Close()
-	b.Write("after") // should be silently ignored
 
-	got := b.ReadNew(time.Second)
-	if got != "before" {
-		t.Fatalf("expected 'before', got %q", got)
+	err := b.Write([]byte("after"))
+	if err != ErrClosed {
+		t.Fatalf("expected ErrClosed, got %v", err)
+	}
+
+	data, err := b.Read(r, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "before" {
+		t.Fatalf("expected 'before', got %q", string(data))
 	}
 }
 
 func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	b := New(1024 * 1024)
+	r := b.NewReader()
 	var wg sync.WaitGroup
 
-	// Multiple concurrent writers
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				b.Write("w")
+				b.Write([]byte("w"))
 			}
 		}(i)
 	}
 
-	// One reader
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		b.ReadNew(2 * time.Second)
+		b.Read(r, 2*time.Second)
 	}()
 
 	wg.Wait()
 }
 
-func TestBuffer_SpuriousWakeup(t *testing.T) {
+func TestBuffer_MultiReaderIndependence(t *testing.T) {
 	b := New(1024)
+	r1 := b.NewReader()
+	r2 := b.NewReader()
 
-	// Simulate spurious wakeup by broadcasting with no data
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		b.newData.Broadcast() // spurious
-		time.Sleep(100 * time.Millisecond)
-		b.Write("real data")
-	}()
+	b.Write([]byte("hello"))
 
-	got := b.ReadNew(2 * time.Second)
-	if got != "real data" {
-		t.Fatalf("expected 'real data' after spurious wakeup, got %q", got)
+	data1, err := b.Read(r1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data2, err := b.Read(r2, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(data1) != "hello" {
+		t.Fatalf("reader 1 expected 'hello', got %q", string(data1))
+	}
+	if string(data2) != "hello" {
+		t.Fatalf("reader 2 expected 'hello', got %q", string(data2))
+	}
+}
+
+func TestBuffer_MultiReaderSequentialWrite(t *testing.T) {
+	b := New(1024)
+	r1 := b.NewReader()
+	r2 := b.NewReader()
+
+	b.Write([]byte("chunk1"))
+	// r1 reads chunk1
+	data1, _ := b.Read(r1, time.Second)
+	if string(data1) != "chunk1" {
+		t.Fatalf("r1 expected 'chunk1', got %q", string(data1))
+	}
+
+	b.Write([]byte("chunk2"))
+	// r1 reads only chunk2
+	data1, _ = b.Read(r1, time.Second)
+	if string(data1) != "chunk2" {
+		t.Fatalf("r1 expected 'chunk2', got %q", string(data1))
+	}
+	// r2 reads both chunk1 and chunk2
+	data2, _ := b.Read(r2, time.Second)
+	s2 := string(data2)
+	if !strings.Contains(s2, "chunk1") || !strings.Contains(s2, "chunk2") {
+		t.Fatalf("r2 expected both chunks, got %q", s2)
+	}
+}
+
+func TestBuffer_Unregister(t *testing.T) {
+	b := New(1024)
+	r := b.NewReader()
+
+	b.Write([]byte("before"))
+	b.Unregister(r)
+
+	// Read from unregistered reader should return error
+	_, err := b.Read(r, 0)
+	if err != ErrReader {
+		t.Fatalf("expected ErrReader, got %v", err)
+	}
+}
+
+func TestBuffer_HasMore(t *testing.T) {
+	b := New(1024)
+	r := b.NewReader()
+
+	if b.HasMore(r) {
+		t.Fatal("expected no data initially")
+	}
+
+	b.Write([]byte("data"))
+	if !b.HasMore(r) {
+		t.Fatal("expected data after write")
+	}
+
+	b.Read(r, 0)
+	if b.HasMore(r) {
+		t.Fatal("expected no data after read")
+	}
+}
+
+func TestBuffer_InvalidReader(t *testing.T) {
+	b := New(1024)
+	_, err := b.Read(999, 0)
+	if err != ErrReader {
+		t.Fatalf("expected ErrReader, got %v", err)
 	}
 }
