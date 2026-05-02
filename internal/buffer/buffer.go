@@ -1,110 +1,152 @@
 package buffer
 
 import (
+	"errors"
+	"io"
 	"sync"
 	"time"
+
+	"github.com/smallnest/ringbuffer"
 )
 
-// Buffer is a thread-safe ring buffer for process output.
+const DefaultMaxBytes = 1024 * 1024
+
+var (
+	ErrClosed = errors.New("buffer: closed")
+	ErrReader = errors.New("buffer: invalid reader ID")
+)
+
+// Buffer is a thread-safe multi-reader ring buffer for process output.
+// Each reader gets its own independent view of the data via a ringbuffer
+// that supports overwrite semantics.
 type Buffer struct {
-	maxBytes int
-	chunks   []string
-	total    int
-	mu       sync.Mutex
-	newData  *sync.Cond
-	closed   bool
-	readPos  int
-	writePos int
+	mu      sync.Mutex
+	size    int
+	readers map[int]*ringbuffer.RingBuffer
+	nextID  int
+	closed  bool
+	cond    *sync.Cond
 }
 
 // New creates a Buffer with the given max capacity in bytes.
 func New(maxBytes int) *Buffer {
 	if maxBytes <= 0 {
-		maxBytes = 1024 * 1024
+		maxBytes = DefaultMaxBytes
 	}
-	b := &Buffer{maxBytes: maxBytes}
-	b.newData = sync.NewCond(&b.mu)
+	b := &Buffer{
+		size:    maxBytes,
+		readers: make(map[int]*ringbuffer.RingBuffer),
+	}
+	b.cond = sync.NewCond(&b.mu)
 	return b
 }
 
-// Write appends data to the buffer.
-func (b *Buffer) Write(data string) {
-	if data == "" {
-		return
+// NewReader registers a new independent reader and returns its ID.
+func (b *Buffer) NewReader() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	id := b.nextID
+	b.nextID++
+	rb := ringbuffer.New(b.size)
+	rb.SetOverwrite(true)
+	b.readers[id] = rb
+	return id
+}
+
+// Unregister removes a reader by ID.
+func (b *Buffer) Unregister(id int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.readers, id)
+}
+
+// Write appends data to the buffer, broadcasting to all waiting readers.
+func (b *Buffer) Write(data []byte) error {
+	if len(data) == 0 {
+		return nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return
+		return ErrClosed
 	}
-	b.chunks = append(b.chunks, data)
-	b.total += len(data)
-	b.writePos++
-	for b.total > b.maxBytes && len(b.chunks) > 1 {
-		oldest := b.chunks[0]
-		b.chunks = b.chunks[1:]
-		b.total -= len(oldest)
-		b.readPos--
-		if b.readPos < 0 {
-			b.readPos = 0
-		}
+	for _, rb := range b.readers {
+		rb.Write(data)
 	}
-	b.newData.Broadcast()
+	b.cond.Broadcast()
+	return nil
 }
 
-// ReadNew returns all unread data, waiting up to timeout if empty.
-// Returns empty string on timeout or if closed.
-func (b *Buffer) ReadNew(timeout time.Duration) string {
+// Read reads all available data for the given reader.
+// If no data is available, it waits up to timeout.
+// Returns (nil, ErrReader) for invalid reader IDs.
+// Returns (nil, io.EOF) if the buffer is closed.
+func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 	b.mu.Lock()
-	if b.readPos < b.writePos {
-		return b.drainLocked()
+	rb, ok := b.readers[readerID]
+	if !ok {
+		b.mu.Unlock()
+		return nil, ErrReader
 	}
+
+	if length := rb.Length(); length > 0 {
+		buf := make([]byte, length)
+		n, _ := rb.Read(buf)
+		b.mu.Unlock()
+		return buf[:n], nil
+	}
+
 	if b.closed {
 		b.mu.Unlock()
-		return ""
+		return nil, io.EOF
 	}
+
 	if timeout <= 0 {
 		b.mu.Unlock()
-		return ""
+		return nil, nil
 	}
+
 	deadline := time.Now().Add(timeout)
-	timer := time.AfterFunc(timeout, b.newData.Broadcast)
+	timer := time.AfterFunc(timeout, b.cond.Broadcast)
 	defer timer.Stop()
-	for b.readPos >= b.writePos && !b.closed {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
+
+	for rb.Length() == 0 && !b.closed {
+		if time.Until(deadline) <= 0 {
 			b.mu.Unlock()
-			return ""
+			return nil, nil
 		}
-		b.newData.Wait()
+		b.cond.Wait()
 	}
-	if b.closed && b.readPos >= b.writePos {
+
+	if length := rb.Length(); length > 0 {
+		buf := make([]byte, length)
+		n, _ := rb.Read(buf)
 		b.mu.Unlock()
-		return ""
+		return buf[:n], nil
 	}
-	return b.drainLocked()
-}
 
-func (b *Buffer) drainLocked() string {
-	var parts []string
-	for b.readPos < b.writePos && len(b.chunks) > 0 {
-		parts = append(parts, b.chunks[0])
-		b.total -= len(b.chunks[0])
-		b.chunks = b.chunks[1:]
-		b.readPos++
-	}
-	result := ""
-	for _, p := range parts {
-		result += p
-	}
 	b.mu.Unlock()
-	return result
+	if b.closed {
+		return nil, io.EOF
+	}
+	return nil, nil
 }
 
-// Close marks the buffer as closed and wakes waiters.
+// HasMore returns whether the given reader has unread data.
+func (b *Buffer) HasMore(readerID int) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	rb, ok := b.readers[readerID]
+	if !ok {
+		return false
+	}
+	return rb.Length() > 0
+}
+
+// Close marks the buffer as closed and wakes all waiting readers.
 func (b *Buffer) Close() {
 	b.mu.Lock()
 	b.closed = true
 	b.mu.Unlock()
-	b.newData.Broadcast()
+	b.cond.Broadcast()
 }
