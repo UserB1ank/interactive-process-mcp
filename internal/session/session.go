@@ -111,21 +111,17 @@ func (s *Session) startReaders() {
 // SendInput writes text to the process stdin.
 func (s *Session) SendInput(text string, pressEnter bool) error {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.Status != api.SessionRunning {
-		s.mu.RUnlock()
 		return fmt.Errorf("process has %s, cannot send input", s.Status)
 	}
-	s.mu.RUnlock()
-
 	if pressEnter {
 		text += "\n"
 	}
-
 	_, err := s.execSession.Stdin.Write([]byte(text))
 	if err != nil {
 		return err
 	}
-
 	if s.msgMgr != nil {
 		s.msgMgr.Append(s.ID, api.MsgInput, text)
 	}
