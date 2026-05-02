@@ -99,6 +99,8 @@ func (m *Manager) CleanupAll(force bool) {
 	for _, s := range m.sessions {
 		list = append(list, s)
 	}
+	// Capture session metadata while holding lock to avoid re-acquiring.
+	sessions := m.ListAll()
 	m.mu.RUnlock()
 	for _, s := range list {
 		s.Terminate(force, 0)
@@ -118,12 +120,18 @@ func (m *Manager) CleanupAll(force bool) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	m.persist()
+	m.persist(sessions)
 }
 
-func (m *Manager) persist() {
+func (m *Manager) persist(sessions ...[]api.Session) {
 	if m.store == nil {
 		return
 	}
-	_ = m.store.SaveSessions(m.ListAll())
+	var list []api.Session
+	if len(sessions) > 0 {
+		list = sessions[0]
+	} else {
+		list = m.ListAll()
+	}
+	_ = m.store.SaveSessions(list)
 }
