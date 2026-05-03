@@ -14,29 +14,9 @@
 
 ## v0.2.1 — 2026-05-02
 
-### Bug Fixes
-
-- **Fixed session lifecycle races**: `Info()` now returns a deep copy of `ExitCode` to prevent data races. `CleanupAll` waits for all sessions to reach exited status before persisting. Reader goroutines properly clean up on terminate via a `done` channel.
-
-- **Fixed error handling gaps**: MCP handlers now validate `mode`, `rows`, `cols`, `timeout`, and `grace_period` parameters. Shared `jsonResult`, `successResult`, and `requireSession` helpers eliminate boilerplate duplication.
-
-- **Fixed message append race**: `Manager.Append` now uses a per-session mutex to prevent concurrent appends from corrupting the message index.
-
-- **Fixed storage atomicity**: All JSON writes use temp-file + fsync + rename to prevent half-written files on crash.
-
-- **Fixed SSH server robustness**: `ProcessState` nil check prevents panic on command-not-found. `started` flag uses `atomic.Bool`. Signal forwarding from client to local process now works in pipe mode. Serve and Setsize errors are logged.
-
-- **Fixed SSH client safety**: `shellQuote` now escapes the command itself. `Close()` closes `Stdin` and returns the first non-nil error. Type assertions use comma-ok pattern.
-
-### Improvements
-
-- **Config validation**: `Validate()` checks port range (1–65535) and non-empty `DataDir`. Default host changed from `0.0.0.0` to `127.0.0.1`.
-
-- **Type safety**: New `SessionMode` type with `ModePTY`/`ModePipe` constants replaces raw string comparisons.
-
-## v0.2.0 — 2026-05-02
-
 ### New Features
+
+- **Go rewrite**: The entire project has been rewritten from Python to Go, replacing the pexpect-based process management with an internal SSH server architecture. This provides native PTY support, proper signal delivery, and better concurrency.
 
 - **Multi-agent session sharing**: Multiple AI agents can now read output from the same process session simultaneously without interfering with each other. Each agent registers as an independent reader with its own cursor — no more output stealing between agents.
 
@@ -48,11 +28,13 @@
 
 ### Improvements
 
-- **Go rewrite**: The entire project has been rewritten from Python to Go, replacing the pexpect-based process management with an internal SSH server architecture. This provides native PTY support, proper signal delivery, and better concurrency.
-
 - **Robust buffer timeout**: Output buffer reads use a goroutine-based deadline mechanism that guarantees reads return after the specified timeout, even under high contention.
 
 - **Session parameter validation**: Input parameters (command mode, terminal dimensions, timeouts) are validated before session creation.
+
+- **Config validation**: `Validate()` checks port range (1–65535) and non-empty `DataDir`. Default host changed from `0.0.0.0` to `127.0.0.1`.
+
+- **Type safety**: New `SessionMode` type with `ModePTY`/`ModePipe` constants replaces raw string comparisons.
 
 ### Bug Fixes
 
@@ -65,6 +47,18 @@
 - **Fixed session lock contention**: Sending input to a process no longer holds a read lock during the actual write, preventing deadlocks when the stdin pipe buffer is full.
 
 - **Fixed concurrent termination race**: Multiple termination calls on the same session are now properly serialized, and the exit code is always set by the authoritative exit goroutine.
+
+- **Fixed session lifecycle races**: `Info()` now returns a deep copy of `ExitCode` to prevent data races. `CleanupAll` waits for all sessions to reach exited status before persisting. Reader goroutines properly clean up on terminate via a `done` channel.
+
+- **Fixed error handling gaps**: MCP handlers now validate `mode`, `rows`, `cols`, `timeout`, and `grace_period` parameters. Shared `jsonResult`, `successResult`, and `requireSession` helpers eliminate boilerplate duplication.
+
+- **Fixed message append race**: `Manager.Append` now uses a per-session mutex to prevent concurrent appends from corrupting the message index.
+
+- **Fixed storage atomicity**: All JSON writes use temp-file + fsync + rename to prevent half-written files on crash.
+
+- **Fixed SSH server robustness**: `ProcessState` nil check prevents panic on command-not-found. `started` flag uses `atomic.Bool`. Signal forwarding from client to local process now works in pipe mode. Serve and Setsize errors are logged.
+
+- **Fixed SSH client safety**: `shellQuote` now escapes the command itself. `Close()` closes `Stdin` and returns the first non-nil error. Type assertions use comma-ok pattern.
 
 ### Breaking Changes
 
