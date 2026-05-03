@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1 — 2026-05-03
+
+### Improvements
+
+- **Compact performance**: Replaced O(n²) blank-line folding loop with single-pass regex. Added early-return fast path for already-clean input — avoids all allocations on typical incremental reads.
+
+- **Changelog corrected**: Merged never-released v0.2.0 into v0.2.1, aligning CHANGELOG with actual tags.
+
 ## v0.3.0 — 2026-05-03
 
 ### New Features
@@ -9,8 +17,6 @@
 ### Improvements
 
 - **Multi-session agent guidelines**: CLAUDE.md now includes multi-session parallel work rules for agents — one session per task, short timeouts (≤3s), poll in rotation, clean up when done.
-
-- **Compact performance**: Replaced O(n²) blank-line folding loop with single-pass regex. Added early-return fast path for already-clean input — avoids all allocations on typical incremental reads.
 
 ## v0.2.1 — 2026-05-02
 
