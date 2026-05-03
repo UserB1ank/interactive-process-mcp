@@ -1,13 +1,26 @@
 package ansi
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
+var blankLineRe = regexp.MustCompile(`\n{3,}`)
+
+// Compact reduces terminal output noise for LLM consumption. It removes control
+// characters (except \r, \n, \t), normalizes CRLF, collapses \r-overwrite
+// sequences (progress bars), strips trailing whitespace, folds excess blank
+// lines, and trims leading/trailing blanks.
 func Compact(text string) string {
 	if text == "" {
 		return ""
 	}
 
-	// Step 1: Remove control characters (keep \r, \n, \t)
+	// Fast path: return early if input looks already clean
+	if !needsCompact(text) {
+		return text
+	}
+
 	var b strings.Builder
 	b.Grow(len(text))
 	for i := 0; i < len(text); i++ {
@@ -22,10 +35,8 @@ func Compact(text string) string {
 	}
 	cleaned := b.String()
 
-	// Normalize \r\n to \n (CRLF line endings)
 	cleaned = strings.ReplaceAll(cleaned, "\r\n", "\n")
 
-	// Step 2: \r-overwrite collapse + Step 3: Trailing whitespace — both per line
 	lines := strings.Split(cleaned, "\n")
 	result := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -37,16 +48,52 @@ func Compact(text string) string {
 	}
 	cleaned = strings.Join(result, "\n")
 
-	// Step 4: Blank line folding — collapse 3+ consecutive \n to 2
-	for strings.Contains(cleaned, "\n\n\n") {
-		cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
-	}
+	cleaned = blankLineRe.ReplaceAllString(cleaned, "\n\n")
 
-	// Step 5: Trim leading/trailing blank lines
 	cleaned = strings.TrimLeft(cleaned, "\n")
 	if strings.HasSuffix(cleaned, "\n\n") {
 		cleaned = strings.TrimRight(cleaned, "\n")
 	}
 
 	return cleaned
+}
+
+func needsCompact(text string) bool {
+	hasControl := false
+	hasCr := false
+	hasTrailingSpace := false
+	blankRun := 0
+	maxBlankRun := 0
+
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c < 0x20 && c != '\r' && c != '\n' && c != '\t' {
+			hasControl = true
+		}
+		if c == 0x7F {
+			hasControl = true
+		}
+		if c == '\r' {
+			hasCr = true
+		}
+		if c == ' ' || c == '\t' {
+			if i+1 >= len(text) || text[i+1] == '\n' {
+				hasTrailingSpace = true
+			}
+		}
+		if c == '\n' {
+			blankRun++
+			if blankRun > maxBlankRun {
+				maxBlankRun = blankRun
+			}
+		} else {
+			blankRun = 0
+		}
+	}
+
+	if text != "" && text[0] == '\n' {
+		return true
+	}
+
+	return hasControl || hasCr || hasTrailingSpace || maxBlankRun >= 3
 }
