@@ -180,6 +180,7 @@ func (s *Session) readOutput(readerID int, timeout time.Duration, stripAnsi bool
 	output := string(data)
 	if stripAnsi {
 		output = ansi.Strip(output)
+		output = ansi.Compact(output)
 	}
 	if maxLines > 0 {
 		lines := strings.Split(output, "\n")

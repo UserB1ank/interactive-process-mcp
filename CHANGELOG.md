@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 — 2026-05-03
+
+### New Features
+
+- **Output noise reduction**: `read_output` and `send_and_read` now automatically compact PTY output when `strip_ansi=true`. Progress bars (e.g. `git clone`, `wget`, `docker pull`), carriage-return overwrites, control characters, trailing whitespace, and excess blank lines are stripped — only the final visible content reaches the LLM. A typical `git clone` drops from ~11,500 bytes to ~200 bytes (98% reduction).
+
+### Improvements
+
+- **Multi-session agent guidelines**: CLAUDE.md now includes multi-session parallel work rules for agents — one session per task, short timeouts (≤3s), poll in rotation, clean up when done.
+
 ## v0.2.1 — 2026-05-02
 
 ### Bug Fixes
