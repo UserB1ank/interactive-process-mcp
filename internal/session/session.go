@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
 	}
+	slog.Debug("session started", "session_id", id, "command", cfg.Command)
 
 	return s, nil
 }
@@ -146,6 +148,7 @@ func (s *Session) startReaders() {
 			if s.msgMgr != nil {
 				s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
 			}
+			slog.Debug("session exited", "session_id", s.ID, "exit_code", code)
 		})
 		// Delay SFTP close so agent can download files after process exits.
 		go func() {
@@ -249,6 +252,7 @@ func (s *Session) Terminate(force bool, gracePeriod time.Duration) {
 			if s.msgMgr != nil {
 				s.msgMgr.Append(s.ID, api.MsgSystem, "Process terminated (no exit code)")
 			}
+			slog.Debug("session terminated", "session_id", s.ID, "forced", force)
 		})
 	})
 }
