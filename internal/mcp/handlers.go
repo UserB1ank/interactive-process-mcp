@@ -189,7 +189,6 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 	if err := sess.SendInput(text, pressEnter); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	time.Sleep(100 * time.Millisecond)
 	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
