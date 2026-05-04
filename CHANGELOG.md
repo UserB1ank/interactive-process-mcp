@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.0 — 2026-05-04
+
+### New Features
+
+- **File transfer**: Upload and download files to/from the process environment via SFTP. Three new tools — `upload_file`, `download_file`, `list_files` — support text and binary files up to 1MB. For larger files, the tool descriptions guide agents to use shell commands (`curl`/`wget`) instead. The SFTP connection stays open for 60 seconds after the process exits so agents can retrieve results.
+
+- **Non-blocking input**: New `background_send` tool sends input to a process and returns immediately without waiting for output. This solves the core blocking issue where `send_and_read` would hang the agent for the full timeout on long-running commands (builds, installs, `sleep`). Agents should use `background_send` + `read_output` for fire-and-forget patterns.
+
+### Improvements
+
+- **Context-aware reads**: `read_output` and `send_and_read` now respect MCP request cancellation. If the client disconnects or cancels mid-read, the buffer returns immediately instead of waiting for the full timeout.
+
+- **Faster send_and_read**: Removed the fixed 100ms sleep between sending input and reading output. The buffer's own timeout handles the wait, making short-command round-trips noticeably snappier.
+
+- **Blocking-aware tool descriptions**: Tool descriptions now include explicit guidance for AI agents — warning about blocking on `send_and_read`, recommending `background_send` for long-running commands, and suggesting timeout ≤ 3s with rotation polling for multi-session workflows.
+
 ## v0.3.1 — 2026-05-03
 
 ### Improvements
