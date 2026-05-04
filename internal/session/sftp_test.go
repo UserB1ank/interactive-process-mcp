@@ -10,7 +10,6 @@ import (
 	"github.com/mac01/interactive-process-mcp/pkg/api"
 )
 
-// Slice 1: Upload a text file, download it, content matches.
 func TestSFTP_UploadDownloadRoundTrip(t *testing.T) {
 	_, addr := startTestServer(t)
 
@@ -45,7 +44,6 @@ func TestSFTP_UploadDownloadRoundTrip(t *testing.T) {
 	}
 }
 
-// Slice 2: Upload, then list shows the file.
 func TestSFTP_ListFiles(t *testing.T) {
 	_, addr := startTestServer(t)
 
@@ -77,7 +75,6 @@ func TestSFTP_ListFiles(t *testing.T) {
 	}
 }
 
-// Slice 3: Binary file returns base64 encoding.
 func TestSFTP_BinaryDownload(t *testing.T) {
 	_, addr := startTestServer(t)
 
@@ -111,7 +108,6 @@ func TestSFTP_BinaryDownload(t *testing.T) {
 	}
 }
 
-// Slice 4: File over 1MB is rejected.
 func TestSFTP_UploadTooLarge(t *testing.T) {
 	_, addr := startTestServer(t)
 
@@ -130,7 +126,6 @@ func TestSFTP_UploadTooLarge(t *testing.T) {
 	}
 }
 
-// Slice 5: Download non-existent file returns error.
 func TestSFTP_DownloadNonExistent(t *testing.T) {
 	_, addr := startTestServer(t)
 
@@ -146,7 +141,6 @@ func TestSFTP_DownloadNonExistent(t *testing.T) {
 	}
 }
 
-// Slice 6: Can download after process exits (within grace period).
 func TestSFTP_PostExitDownload(t *testing.T) {
 	_, addr := startTestServer(t)
 
