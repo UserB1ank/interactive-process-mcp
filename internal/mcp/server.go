@@ -114,6 +114,25 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Reader ID to unregister")),
 	), s.handleUnregisterReader)
 
+	mcpServer.AddTool(mcpgo.NewTool("upload_file",
+		mcpgo.WithDescription("Upload a file to the process environment via SFTP. Max 1MB. For large files, use send_input with curl/wget instead."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithString("content_base64", mcpgo.Required(), mcpgo.Description("File content encoded as base64")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Destination path in the process environment")),
+	), s.handleUploadFile)
+
+	mcpServer.AddTool(mcpgo.NewTool("download_file",
+		mcpgo.WithDescription("Download a file from the process environment via SFTP. Text files returned as plain text, binary files as base64. Max 1MB."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Path of the file to download")),
+	), s.handleDownloadFile)
+
+	mcpServer.AddTool(mcpgo.NewTool("list_files",
+		mcpgo.WithDescription("List files and directories at a path in the process environment via SFTP"),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Directory path to list")),
+	), s.handleListFiles)
+
 	s.mcpServer = mcpServer
 	s.sseServer = mcpserver.NewSSEServer(mcpServer)
 	return s

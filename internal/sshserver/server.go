@@ -16,6 +16,7 @@ import (
 
 	"github.com/creack/pty"
 	gliderssh "github.com/gliderlabs/ssh"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -46,6 +47,20 @@ func New(addr string) *Server {
 		},
 		PtyCallback: func(ctx gliderssh.Context, pty gliderssh.Pty) bool {
 			return true
+		},
+		SubsystemHandlers: map[string]gliderssh.SubsystemHandler{
+			"sftp": func(sess gliderssh.Session) {
+				server, err := sftp.NewServer(sess)
+				if err != nil {
+					log.Printf("sftp server init error: %v", err)
+					return
+				}
+				if err := server.Serve(); err == io.EOF {
+					server.Close()
+				} else if err != nil {
+					log.Printf("sftp server error: %v", err)
+				}
+			},
 		},
 	}
 	return s
