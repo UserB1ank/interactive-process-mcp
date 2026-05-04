@@ -28,7 +28,7 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 	mcpServer := mcpserver.NewMCPServer("interactive-process", "0.1.0")
 
 	mcpServer.AddTool(mcpgo.NewTool("start_process",
-		mcpgo.WithDescription("Start an interactive process and return its session info"),
+		mcpgo.WithDescription("Start an interactive process and return its session info. For long-running commands, use background_send + read_output instead of send_and_read to avoid blocking."),
 		mcpgo.WithString("command", mcpgo.Required(), mcpgo.Description("Command to execute")),
 		mcpgo.WithArray("args", mcpgo.Description("Command arguments"), mcpgo.WithStringItems()),
 		mcpgo.WithString("mode", mcpgo.Description("I/O mode: pty or pipe"), mcpgo.DefaultString("pty")),
@@ -38,37 +38,37 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 	), s.handleStartProcess)
 
 	mcpServer.AddTool(mcpgo.NewTool("send_input",
-		mcpgo.WithDescription("Send text input to a running interactive process"),
+		mcpgo.WithDescription("Send text input to a running interactive process without reading output. Pair with read_output to check the result."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
 	), s.handleSendInput)
 
 	mcpServer.AddTool(mcpgo.NewTool("read_output",
-		mcpgo.WithDescription("Read new output from an interactive process since last read"),
+		mcpgo.WithDescription("Read new output from an interactive process since last read. Use timeout ≤ 3 seconds when managing multiple sessions — poll each in rotation."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
-		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for new output"), mcpgo.DefaultNumber(5)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for new output (max 60)"), mcpgo.DefaultNumber(5)),
 		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
 		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
 	), s.handleReadOutput)
 
 	mcpServer.AddTool(mcpgo.NewTool("background_send",
-		mcpgo.WithDescription("Send input to a process without waiting for output. Returns immediately. Use this instead of send_and_read when you don't need the response right away, especially for long-running commands."),
+		mcpgo.WithDescription("Send input to a process without waiting for output. Returns immediately. Use this instead of send_and_read when you don't need the response right away, especially for long-running commands. Follow up with read_output to check results."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
 	), s.handleBackgroundSend)
 
 	mcpServer.AddTool(mcpgo.NewTool("send_and_read",
-		mcpgo.WithDescription("Send input to a process and immediately read its response"),
+		mcpgo.WithDescription("Send input to a process and immediately read its response. WARNING: blocks until output arrives or timeout. For long-running commands (sleep, builds, installs), use background_send + read_output instead to avoid blocking."),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
 		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
 		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
 		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("Remove ANSI escape codes"), mcpgo.DefaultBool(true)),
-		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for response"), mcpgo.DefaultNumber(5)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Seconds to wait for response (max 60)"), mcpgo.DefaultNumber(5)),
 		mcpgo.WithNumber("max_lines", mcpgo.Description("Max lines to return (0 = unlimited)"), mcpgo.DefaultNumber(0)),
-			mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
 	), s.handleSendAndRead)
 
 	mcpServer.AddTool(mcpgo.NewTool("list_sessions",
