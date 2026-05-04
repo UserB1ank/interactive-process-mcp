@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mac01/interactive-process-mcp/internal/sshserver"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -163,4 +164,34 @@ func quoteIfNeeded(s string) string {
 		return strconv.Quote(s)
 	}
 	return s
+}
+
+// SFTPConn wraps an SFTP client and its underlying SSH connection.
+type SFTPConn struct {
+	Client *sftp.Client
+	conn   *ssh.Client
+}
+
+// Close shuts down the SFTP client and the underlying SSH connection.
+func (c *SFTPConn) Close() error {
+	err := c.Client.Close()
+	if connErr := c.conn.Close(); connErr != nil && err == nil {
+		err = connErr
+	}
+	return err
+}
+
+// NewSFTPClient dials a new SSH connection and opens an SFTP session.
+func NewSFTPClient(addr string) (*SFTPConn, error) {
+	config := sshserver.ClientConfig()
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return nil, fmt.Errorf("ssh dial for sftp: %w", err)
+	}
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("sftp client: %w", err)
+	}
+	return &SFTPConn{Client: sftpClient, conn: client}, nil
 }

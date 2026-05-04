@@ -1,8 +1,10 @@
 package session
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/mac01/interactive-process-mcp/internal/buffer"
 	"github.com/mac01/interactive-process-mcp/internal/message"
 	"github.com/mac01/interactive-process-mcp/internal/sshclient"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -36,6 +39,10 @@ type Session struct {
 	terminateOnce sync.Once
 	exitOnce      sync.Once
 	execSession   *sshclient.ExecSession
+	sftpClient    *sftp.Client
+	sftpConn      *sshclient.SFTPConn
+	sftpClose     chan struct{}
+	sftpCloseOnce sync.Once
 	buf           *buffer.Buffer
 	readerID      int
 	msgMgr        *message.Manager
@@ -79,9 +86,18 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 		msgMgr:      msgMgr,
 		sshAddr:     sshAddr,
 		done:        make(chan struct{}),
+		sftpClose:   make(chan struct{}),
 	}
 
 	s.startReaders()
+
+	sftpClient, err := sshclient.NewSFTPClient(sshAddr)
+	if err != nil {
+		execSession.Close()
+		return nil, fmt.Errorf("sftp client: %w", err)
+	}
+	s.sftpClient = sftpClient.Client
+	s.sftpConn = sftpClient
 
 	if msgMgr != nil {
 		msgMgr.Append(s.ID, api.MsgSystem, "Process started")
@@ -146,6 +162,20 @@ func (s *Session) startReaders() {
 				s.msgMgr.Append(s.ID, api.MsgSystem, fmt.Sprintf("Process exited with code %d", code))
 			}
 		})
+		// Delay SFTP close so agent can download files after process exits.
+		go func() {
+			select {
+			case <-time.After(60 * time.Second):
+			case <-s.sftpClose:
+			}
+			s.mu.Lock()
+			if s.sftpConn != nil {
+				s.sftpConn.Close()
+				s.sftpClient = nil
+				s.sftpConn = nil
+			}
+			s.mu.Unlock()
+		}()
 	}()
 }
 
@@ -282,4 +312,139 @@ func (s *Session) UnregisterReader(id int) {
 // HasMoreOutput returns whether the given reader has unread data.
 func (s *Session) HasMoreOutput(readerID int) bool {
 	return s.buf.HasMore(readerID)
+}
+
+const maxFileSize = 1 << 20 // 1MB
+
+// UploadFile writes base64-encoded content to remote_path via SFTP.
+func (s *Session) UploadFile(contentBase64 string, remotePath string) (int, error) {
+	s.mu.RLock()
+	sc := s.sftpClient
+	s.mu.RUnlock()
+	if sc == nil {
+		return 0, fmt.Errorf("SFTP not available (session closed)")
+	}
+
+	data, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid base64: %w", err)
+	}
+	if len(data) > maxFileSize {
+		return 0, fmt.Errorf("file too large (%d bytes, max %d). Use shell commands (curl/wget) for large files", len(data), maxFileSize)
+	}
+
+	dir := filepath.Dir(remotePath)
+	if dir != "." && dir != "/" {
+		sc.MkdirAll(dir)
+	}
+
+	f, err := sc.Create(remotePath)
+	if err != nil {
+		return 0, fmt.Errorf("create remote file: %w", err)
+	}
+	defer f.Close()
+
+	n, err := f.Write(data)
+	if err != nil {
+		return 0, fmt.Errorf("write remote file: %w", err)
+	}
+	return n, nil
+}
+
+// FileEntry represents a file or directory in a listing.
+type FileEntry struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	IsDir   bool   `json:"is_dir"`
+	ModTime string `json:"mod_time"`
+}
+
+// DownloadResult represents a downloaded file's content.
+type DownloadResult struct {
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"` // "text" or "base64"
+	Size     int    `json:"size"`
+}
+
+// DownloadFile reads a remote file and returns its content.
+func (s *Session) DownloadFile(remotePath string) (*DownloadResult, error) {
+	s.mu.RLock()
+	sc := s.sftpClient
+	s.mu.RUnlock()
+	if sc == nil {
+		return nil, fmt.Errorf("SFTP not available (session closed)")
+	}
+
+	stat, err := sc.Stat(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("stat remote file: %w", err)
+	}
+	if stat.Size() > int64(maxFileSize) {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d). Use shell commands to transfer", stat.Size(), maxFileSize)
+	}
+
+	f, err := sc.Open(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("open remote file: %w", err)
+	}
+	defer f.Close()
+
+	data := make([]byte, stat.Size())
+	_, err = io.ReadFull(f, data)
+	if err != nil {
+		return nil, fmt.Errorf("read remote file: %w", err)
+	}
+
+	content := string(data)
+	if isValidUTF8(data) {
+		return &DownloadResult{Content: content, Encoding: "text", Size: len(data)}, nil
+	}
+	return &DownloadResult{Content: base64.StdEncoding.EncodeToString(data), Encoding: "base64", Size: len(data)}, nil
+}
+
+// ListFiles returns directory entries for the given path.
+func (s *Session) ListFiles(remotePath string) ([]FileEntry, error) {
+	s.mu.RLock()
+	sc := s.sftpClient
+	s.mu.RUnlock()
+	if sc == nil {
+		return nil, fmt.Errorf("SFTP not available (session closed)")
+	}
+
+	entries, err := sc.ReadDir(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("list remote directory: %w", err)
+	}
+
+	result := make([]FileEntry, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, FileEntry{
+			Name:    e.Name(),
+			Size:    e.Size(),
+			IsDir:   e.IsDir(),
+			ModTime: e.ModTime().UTC().Format(time.RFC3339),
+		})
+	}
+	return result, nil
+}
+
+// CloseSFTP signals the delayed-close goroutine and closes SFTP immediately.
+func (s *Session) CloseSFTP() {
+	s.sftpCloseOnce.Do(func() { close(s.sftpClose) })
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sftpConn != nil {
+		s.sftpConn.Close()
+		s.sftpClient = nil
+		s.sftpConn = nil
+	}
+}
+
+func isValidUTF8(data []byte) bool {
+	for i := 0; i < len(data); i++ {
+		if data[i] == 0 {
+			return false
+		}
+	}
+	return true
 }
