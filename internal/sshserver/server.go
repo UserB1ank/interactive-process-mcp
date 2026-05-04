@@ -7,7 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -52,13 +52,13 @@ func New(addr string) *Server {
 			"sftp": func(sess gliderssh.Session) {
 				server, err := sftp.NewServer(sess)
 				if err != nil {
-					log.Printf("sftp server init error: %v", err)
+					slog.Error("sftp server init failed", "err", err)
 					return
 				}
 				if err := server.Serve(); err == io.EOF {
 					server.Close()
 				} else if err != nil {
-					log.Printf("sftp server error: %v", err)
+					slog.Error("sftp server failed", "err", err)
 				}
 			},
 		},
@@ -93,7 +93,7 @@ func (s *Server) Start() error {
 
 	go func() {
 		if err := s.server.Serve(ln); err != nil {
-			log.Printf("SSH server stopped: %v", err)
+			slog.Info("ssh server stopped", "err", err)
 		}
 	}()
 	return nil
@@ -166,7 +166,7 @@ func (s *Server) handleSession(sess gliderssh.Session) {
 					Rows: uint16(win.Height),
 					Cols: uint16(win.Width),
 				}); err != nil {
-					log.Printf("Setsize error: %v", err)
+					slog.Warn("pty setsize failed", "err", err)
 				}
 			}
 		}()
