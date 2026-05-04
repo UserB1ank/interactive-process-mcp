@@ -53,6 +53,13 @@ func New(sessMgr *session.Manager, msgMgr *message.Manager) *Server {
 		mcpgo.WithNumber("reader_id", mcpgo.Description("Reader ID (0 = default shared reader)"), mcpgo.DefaultNumber(0)),
 	), s.handleReadOutput)
 
+	mcpServer.AddTool(mcpgo.NewTool("background_send",
+		mcpgo.WithDescription("Send input to a process without waiting for output. Returns immediately. Use this instead of send_and_read when you don't need the response right away, especially for long-running commands."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("Text to send")),
+		mcpgo.WithBoolean("press_enter", mcpgo.Description("Append newline after text"), mcpgo.DefaultBool(false)),
+	), s.handleBackgroundSend)
+
 	mcpServer.AddTool(mcpgo.NewTool("send_and_read",
 		mcpgo.WithDescription("Send input to a process and immediately read its response"),
 		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session ID")),
