@@ -301,6 +301,35 @@ func containsString(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || strings.Contains(s, sub))
 }
 
+func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
+	s := newTestServer(t)
+
+	startReq := makeRequest(map[string]any{
+		"command": "bash",
+		"args":    []any{"-c", "echo done"},
+		"mode":    "pty",
+	})
+	startResult, _ := s.handleStartProcess(context.Background(), startReq)
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	// Wait for process to exit
+	time.Sleep(2 * time.Second)
+
+	bgReq := makeRequest(map[string]any{
+		"session_id":  sessionID,
+		"text":        "should fail",
+		"press_enter": true,
+	})
+	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bgResult.IsError {
+		t.Fatal("expected error when sending to exited session")
+	}
+}
+
 func TestHandleStartProcess_InvalidMode(t *testing.T) {
 	s := newTestServer(t)
 	for _, mode := range []string{"websocket", "", "PIPE"} {
