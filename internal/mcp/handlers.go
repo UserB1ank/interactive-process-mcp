@@ -115,7 +115,7 @@ func (s *Server) handleStartProcess(ctx context.Context, request mcpgo.CallToolR
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	initial, _ := sess.ReadOutput(500*time.Millisecond, true, 0)
+	initial, _ := sess.ReadOutput(ctx, 500*time.Millisecond, true, 0)
 
 	result := map[string]any{
 		"session_id":     sess.ID,
@@ -156,7 +156,7 @@ func (s *Server) handleReadOutput(ctx context.Context, request mcpgo.CallToolReq
 	if bad != nil {
 		return bad, nil
 	}
-	output, err := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -190,7 +190,7 @@ func (s *Server) handleSendAndRead(ctx context.Context, request mcpgo.CallToolRe
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	time.Sleep(100 * time.Millisecond)
-	output, err := sess.ReadOutputForReader(readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
+	output, err := sess.ReadOutputForReader(ctx, readerID, time.Duration(timeout*float64(time.Second)), stripAnsi, maxLines)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}

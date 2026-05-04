@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -83,10 +84,10 @@ func (b *Buffer) Write(data []byte) error {
 }
 
 // Read reads all available data for the given reader.
-// If no data is available, it waits up to timeout.
+// If no data is available, it waits up to timeout or until ctx is cancelled.
 // Returns (nil, ErrReader) for invalid reader IDs.
 // Returns (nil, io.EOF) if the buffer is closed.
-func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
+func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) ([]byte, error) {
 	b.mu.Lock()
 	rb, ok := b.readers[readerID]
 	if !ok {
@@ -111,19 +112,41 @@ func (b *Buffer) Read(readerID int, timeout time.Duration) ([]byte, error) {
 
 	deadline := time.Now().Add(timeout)
 	stop := make(chan struct{})
+	timerFired := make(chan struct{}, 1)
 	go func() {
 		select {
 		case <-time.After(time.Until(deadline)):
 			b.cond.Broadcast()
+			close(timerFired)
 		case <-stop:
 		}
 	}()
 	defer close(stop)
 
+	// Watch for context cancellation
+	ctxDone := ctx.Done()
+	if ctxDone != nil {
+		go func() {
+			select {
+			case <-ctxDone:
+				b.cond.Broadcast()
+			case <-stop:
+			}
+		}()
+	}
+
 	for rb.Length() == 0 && !b.closed {
 		if time.Until(deadline) <= 0 {
 			b.mu.Unlock()
 			return nil, nil
+		}
+		if ctxDone != nil {
+			select {
+			case <-ctxDone:
+				b.mu.Unlock()
+				return nil, nil
+			default:
+			}
 		}
 		b.cond.Wait()
 		if _, ok := b.readers[readerID]; !ok {
