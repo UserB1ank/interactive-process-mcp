@@ -112,12 +112,10 @@ func (b *Buffer) Read(ctx context.Context, readerID int, timeout time.Duration) 
 
 	deadline := time.Now().Add(timeout)
 	stop := make(chan struct{})
-	timerFired := make(chan struct{}, 1)
 	go func() {
 		select {
 		case <-time.After(time.Until(deadline)):
 			b.cond.Broadcast()
-			close(timerFired)
 		case <-stop:
 		}
 	}()
