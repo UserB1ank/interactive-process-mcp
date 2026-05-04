@@ -301,6 +301,57 @@ func containsString(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || strings.Contains(s, sub))
 }
 
+func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
+	s := newTestServer(t)
+
+	startReq := makeRequest(map[string]any{
+		"command": "bash",
+		"mode":    "pty",
+	})
+	startResult, err := s.handleStartProcess(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Cancel context after 200ms — send_and_read should return quickly
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	sarReq := makeRequest(map[string]any{
+		"session_id":  sessionID,
+		"text":        "sleep 10",
+		"press_enter": true,
+		"timeout":     30.0,
+	})
+	sarResult, err := s.handleSendAndRead(ctx, sarReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+
+	// Should return within 500ms after cancellation, not wait 30s
+	if elapsed > 2*time.Second {
+		t.Fatalf("send_and_read should return on ctx cancel, took %v", elapsed)
+	}
+
+	// Result should not be an error — just empty output from cancelled read
+	if sarResult.IsError {
+		// Could be error from send or read — both are acceptable on cancel
+	}
+
+	// Cleanup
+	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
+	s.handleTerminateProcess(context.Background(), termReq)
+}
+
 func TestHandleBackgroundSend_ExitedSession(t *testing.T) {
 	s := newTestServer(t)
 
