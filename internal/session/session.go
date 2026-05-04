@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -39,7 +40,6 @@ type Session struct {
 	terminateOnce sync.Once
 	exitOnce      sync.Once
 	execSession   *sshclient.ExecSession
-	sftpClient    *sftp.Client
 	sftpConn      *sshclient.SFTPConn
 	sftpClose     chan struct{}
 	sftpCloseOnce sync.Once
@@ -96,7 +96,6 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 		execSession.Close()
 		return nil, fmt.Errorf("sftp client: %w", err)
 	}
-	s.sftpClient = sftpClient.Client
 	s.sftpConn = sftpClient
 
 	if msgMgr != nil {
@@ -171,7 +170,6 @@ func (s *Session) startReaders() {
 			s.mu.Lock()
 			if s.sftpConn != nil {
 				s.sftpConn.Close()
-				s.sftpClient = nil
 				s.sftpConn = nil
 			}
 			s.mu.Unlock()
@@ -314,20 +312,29 @@ func (s *Session) HasMoreOutput(readerID int) bool {
 	return s.buf.HasMore(readerID)
 }
 
-const maxFileSize = 1 << 20 // 1MB
+const maxFileSize = 1 << 20 // 1MB — keeps transfers within MCP message bounds
 
-// UploadFile writes base64-encoded content to remote_path via SFTP.
-func (s *Session) UploadFile(contentBase64 string, remotePath string) (int, error) {
+// getSFTPClient returns the SFTP client or an error if unavailable.
+func (s *Session) getSFTPClient() (*sftp.Client, error) {
 	s.mu.RLock()
-	sc := s.sftpClient
+	conn := s.sftpConn
 	s.mu.RUnlock()
-	if sc == nil {
-		return 0, fmt.Errorf("SFTP not available (session closed)")
+	if conn == nil {
+		return nil, fmt.Errorf("SFTP not available (session closed)")
+	}
+	return conn.Client, nil
+}
+
+// UploadFile decodes base64 content and writes it to the container filesystem.
+func (s *Session) UploadFile(contentBase64 string, remotePath string) (int, error) {
+	sc, err := s.getSFTPClient()
+	if err != nil {
+		return 0, err
 	}
 
 	data, err := base64.StdEncoding.DecodeString(contentBase64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid base64: %w", err)
+		return 0, fmt.Errorf("content_base64: %w", err)
 	}
 	if len(data) > maxFileSize {
 		return 0, fmt.Errorf("file too large (%d bytes, max %d). Use shell commands (curl/wget) for large files", len(data), maxFileSize)
@@ -335,18 +342,20 @@ func (s *Session) UploadFile(contentBase64 string, remotePath string) (int, erro
 
 	dir := filepath.Dir(remotePath)
 	if dir != "." && dir != "/" {
-		sc.MkdirAll(dir)
+		if err := sc.MkdirAll(dir); err != nil {
+			return 0, fmt.Errorf("create directory %q: %w", dir, err)
+		}
 	}
 
 	f, err := sc.Create(remotePath)
 	if err != nil {
-		return 0, fmt.Errorf("create remote file: %w", err)
+		return 0, fmt.Errorf("create %q: %w", remotePath, err)
 	}
 	defer f.Close()
 
 	n, err := f.Write(data)
 	if err != nil {
-		return 0, fmt.Errorf("write remote file: %w", err)
+		return 0, fmt.Errorf("write %q: %w", remotePath, err)
 	}
 	return n, nil
 }
@@ -366,18 +375,17 @@ type DownloadResult struct {
 	Size     int    `json:"size"`
 }
 
-// DownloadFile reads a remote file and returns its content.
+// DownloadFile retrieves a file from the container. Binary content is
+// base64-encoded; text is returned verbatim to save tokens.
 func (s *Session) DownloadFile(remotePath string) (*DownloadResult, error) {
-	s.mu.RLock()
-	sc := s.sftpClient
-	s.mu.RUnlock()
-	if sc == nil {
-		return nil, fmt.Errorf("SFTP not available (session closed)")
+	sc, err := s.getSFTPClient()
+	if err != nil {
+		return nil, err
 	}
 
 	stat, err := sc.Stat(remotePath)
 	if err != nil {
-		return nil, fmt.Errorf("stat remote file: %w", err)
+		return nil, fmt.Errorf("stat %q: %w", remotePath, err)
 	}
 	if stat.Size() > int64(maxFileSize) {
 		return nil, fmt.Errorf("file too large (%d bytes, max %d). Use shell commands to transfer", stat.Size(), maxFileSize)
@@ -385,35 +393,32 @@ func (s *Session) DownloadFile(remotePath string) (*DownloadResult, error) {
 
 	f, err := sc.Open(remotePath)
 	if err != nil {
-		return nil, fmt.Errorf("open remote file: %w", err)
+		return nil, fmt.Errorf("open %q: %w", remotePath, err)
 	}
 	defer f.Close()
 
 	data := make([]byte, stat.Size())
-	_, err = io.ReadFull(f, data)
-	if err != nil {
-		return nil, fmt.Errorf("read remote file: %w", err)
+	if _, err := io.ReadFull(f, data); err != nil {
+		return nil, fmt.Errorf("read %q: %w", remotePath, err)
 	}
 
-	content := string(data)
-	if isValidUTF8(data) {
-		return &DownloadResult{Content: content, Encoding: "text", Size: len(data)}, nil
+	if bytes.IndexByte(data, 0) < 0 {
+		return &DownloadResult{Content: string(data), Encoding: "text", Size: len(data)}, nil
 	}
 	return &DownloadResult{Content: base64.StdEncoding.EncodeToString(data), Encoding: "base64", Size: len(data)}, nil
 }
 
-// ListFiles returns directory entries for the given path.
+// ListFiles enumerates a remote directory so the agent can discover
+// files without shell commands.
 func (s *Session) ListFiles(remotePath string) ([]FileEntry, error) {
-	s.mu.RLock()
-	sc := s.sftpClient
-	s.mu.RUnlock()
-	if sc == nil {
-		return nil, fmt.Errorf("SFTP not available (session closed)")
+	sc, err := s.getSFTPClient()
+	if err != nil {
+		return nil, err
 	}
 
 	entries, err := sc.ReadDir(remotePath)
 	if err != nil {
-		return nil, fmt.Errorf("list remote directory: %w", err)
+		return nil, fmt.Errorf("list %q: %w", remotePath, err)
 	}
 
 	result := make([]FileEntry, 0, len(entries))
@@ -428,23 +433,14 @@ func (s *Session) ListFiles(remotePath string) ([]FileEntry, error) {
 	return result, nil
 }
 
-// CloseSFTP signals the delayed-close goroutine and closes SFTP immediately.
+// CloseSFTP tears down the SFTP connection early instead of waiting
+// for the 60-second delayed close.
 func (s *Session) CloseSFTP() {
 	s.sftpCloseOnce.Do(func() { close(s.sftpClose) })
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sftpConn != nil {
 		s.sftpConn.Close()
-		s.sftpClient = nil
 		s.sftpConn = nil
 	}
-}
-
-func isValidUTF8(data []byte) bool {
-	for i := 0; i < len(data); i++ {
-		if data[i] == 0 {
-			return false
-		}
-	}
-	return true
 }
