@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,6 +234,71 @@ func TestHandleListMessages(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("expected at least one message")
 	}
+}
+
+func TestHandleBackgroundSend_Success(t *testing.T) {
+	s := newTestServer(t)
+
+	startReq := makeRequest(map[string]any{
+		"command": "bash",
+		"mode":    "pty",
+	})
+	startResult, err := s.handleStartProcess(context.Background(), startReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parseResult(t, startResult)
+	sessionID := m["session_id"].(string)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// background_send should return immediately without reading output
+	start := time.Now()
+	bgReq := makeRequest(map[string]any{
+		"session_id":  sessionID,
+		"text":        "echo bg_test",
+		"press_enter": true,
+	})
+	bgResult, err := s.handleBackgroundSend(context.Background(), bgReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bgResult.IsError {
+		t.Fatalf("unexpected error: %s", bgResult.Content[0].(mcpgo.TextContent).Text)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("background_send took %v — should return immediately", elapsed)
+	}
+
+	bgM := parseResult(t, bgResult)
+	if bgM["success"] != true {
+		t.Fatal("expected success=true")
+	}
+
+	// Verify the input was actually delivered by reading output
+	time.Sleep(200 * time.Millisecond)
+	readReq := makeRequest(map[string]any{
+		"session_id": sessionID,
+		"timeout":    2.0,
+	})
+	readResult, err := s.handleReadOutput(context.Background(), readReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readM := parseResult(t, readResult)
+	output := readM["output"].(string)
+	if len(output) == 0 || !containsString(output, "bg_test") {
+		t.Fatalf("expected output containing 'bg_test', got %q", output)
+	}
+
+	// Cleanup
+	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
+	s.handleTerminateProcess(context.Background(), termReq)
+}
+
+func containsString(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || strings.Contains(s, sub))
 }
 
 func TestHandleStartProcess_InvalidMode(t *testing.T) {

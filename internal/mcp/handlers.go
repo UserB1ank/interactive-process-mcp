@@ -328,6 +328,22 @@ func (s *Server) handleUnregisterReader(ctx context.Context, request mcpgo.CallT
 	return successResult(), nil
 }
 
+func (s *Server) handleBackgroundSend(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	args := request.GetArguments()
+	sessionID := getString(args, "session_id", "")
+	text := getString(args, "text", "")
+	pressEnter := getBool(args, "press_enter", false)
+
+	sess, bad := s.requireSession(sessionID)
+	if bad != nil {
+		return bad, nil
+	}
+	if err := sess.SendInput(text, pressEnter); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	return successResult(), nil
+}
+
 func (s *Server) handleUploadFile(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	args := request.GetArguments()
 	sessionID := getString(args, "session_id", "")
