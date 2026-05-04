@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.1 — 2026-05-04
+
+### New Features
+
+- **Verbose logging**: Server now supports structured logging via Go stdlib `log/slog`. Two new flags control output:
+  - `-log-level` — `debug` | `info` | `warn` | `error` (default `info`)
+  - `-log-format` — `text` | `json` (default `text`)
+
+- **MCP tool call tracing**: Every tool call is logged with entry/exit timestamps, duration, session/reader IDs, and error flags. Go-level errors are logged at `Error` level; `IsError` results stay at `Debug`.
+
+- **Session lifecycle logs**: Session start, exit, and termination events emit `Debug`-level records with session ID and exit code.
+
 ## v0.4.0 — 2026-05-04
 
 ### New Features
