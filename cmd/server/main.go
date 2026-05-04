@@ -4,7 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,16 +26,26 @@ func main() {
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage")
 	flag.StringVar(&cfg.SSHHost, "ssh-host", cfg.SSHHost, "Internal SSH server host")
 	flag.IntVar(&cfg.SSHPort, "ssh-port", cfg.SSHPort, "Internal SSH server port (0 = random)")
+	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
+	flag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log output format: text|json")
 	flag.Parse()
+
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)
+		os.Exit(2)
+	}
+
+	slog.SetDefault(slog.New(buildLogHandler(cfg)))
 
 	// Start internal SSH server
 	sshAddr := fmt.Sprintf("%s:%d", cfg.SSHHost, cfg.SSHPort)
 	sshSrv := sshserver.New(sshAddr)
 	if err := sshSrv.Start(); err != nil {
-		log.Fatalf("Failed to start SSH server: %v", err)
+		slog.Error("failed to start SSH server", "err", err)
+		os.Exit(1)
 	}
 	actualSSHAddr := sshSrv.Addr()
-	log.Printf("Internal SSH server listening on %s", actualSSHAddr)
+	slog.Info("internal SSH server listening", "addr", actualSSHAddr)
 
 	// Initialize storage and managers
 	store := storage.New(cfg.DataDir)
@@ -45,7 +55,7 @@ func main() {
 	// Start MCP SSE server
 	mcpSrv := mcpmod.New(sessMgr, msgMgr)
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	log.Printf("MCP SSE server listening on %s", addr)
+	slog.Info("MCP SSE server listening", "addr", addr)
 
 	var shuttingDown atomic.Bool
 
@@ -55,7 +65,7 @@ func main() {
 	go func() {
 		<-sigCh
 		shuttingDown.Store(true)
-		log.Println("Shutting down...")
+		slog.Info("shutting down")
 		sessMgr.CleanupAll(true)
 		sshSrv.Stop()
 		mcpSrv.Stop()
@@ -63,9 +73,29 @@ func main() {
 
 	if err := mcpSrv.Start(addr); err != nil {
 		if shuttingDown.Load() && errors.Is(err, http.ErrServerClosed) {
-			log.Println("Server stopped")
+			slog.Info("server stopped")
 			return
 		}
-		log.Fatalf("Failed to start MCP server: %v", err)
+		slog.Error("failed to start MCP server", "err", err)
+		os.Exit(1)
 	}
+}
+
+func buildLogHandler(cfg *config.Config) slog.Handler {
+	var level slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	if cfg.LogFormat == "json" {
+		return slog.NewJSONHandler(os.Stderr, opts)
+	}
+	return slog.NewTextHandler(os.Stderr, opts)
 }
