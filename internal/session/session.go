@@ -106,11 +106,11 @@ func New(sshAddr string, cfg Config, msgMgr *message.Manager) (*Session, error) 
 	return s, nil
 }
 
-func (s *Session) startReaders() {
+func (s *Session) pipeToBuffer(r io.Reader) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, err := s.execSession.Stdout.Read(buf)
+			n, err := r.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
@@ -126,26 +126,11 @@ func (s *Session) startReaders() {
 			}
 		}
 	}()
+}
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := s.execSession.Stderr.Read(buf)
-			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				s.buf.Write(data)
-			}
-			if err != nil {
-				return
-			}
-			select {
-			case <-s.done:
-				return
-			default:
-			}
-		}
-	}()
+func (s *Session) startReaders() {
+	s.pipeToBuffer(s.execSession.Stdout)
+	s.pipeToBuffer(s.execSession.Stderr)
 
 	go func() {
 		<-s.execSession.Done()
@@ -331,6 +316,10 @@ func (s *Session) UploadFile(contentBase64 string, remotePath string) (int, erro
 	sc, err := s.getSFTPClient()
 	if err != nil {
 		return 0, err
+	}
+
+	if len(contentBase64) > base64.StdEncoding.EncodedLen(maxFileSize) {
+		return 0, fmt.Errorf("file too large (max %d bytes). Use shell commands (curl/wget) for large files", maxFileSize)
 	}
 
 	data, err := base64.StdEncoding.DecodeString(contentBase64)

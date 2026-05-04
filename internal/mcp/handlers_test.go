@@ -288,17 +288,13 @@ func TestHandleBackgroundSend_Success(t *testing.T) {
 	}
 	readM := parseResult(t, readResult)
 	output := readM["output"].(string)
-	if len(output) == 0 || !containsString(output, "bg_test") {
+	if len(output) == 0 || !strings.Contains(output, "bg_test") {
 		t.Fatalf("expected output containing 'bg_test', got %q", output)
 	}
 
 	// Cleanup
 	termReq := makeRequest(map[string]any{"session_id": sessionID, "force": true})
 	s.handleTerminateProcess(context.Background(), termReq)
-}
-
-func containsString(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || strings.Contains(s, sub))
 }
 
 func TestHandleSendAndRead_ContextCancelled(t *testing.T) {
