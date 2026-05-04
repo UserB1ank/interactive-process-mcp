@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -200,8 +201,8 @@ func (s *Session) SendInput(text string, pressEnter bool) error {
 	return nil
 }
 
-func (s *Session) readOutput(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	data, err := s.buf.Read(readerID, timeout)
+func (s *Session) readOutput(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	data, err := s.buf.Read(ctx, readerID, timeout)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -223,13 +224,13 @@ func (s *Session) readOutput(readerID int, timeout time.Duration, stripAnsi bool
 }
 
 // ReadOutput reads new output using the default reader.
-func (s *Session) ReadOutput(timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(s.readerID, timeout, stripAnsi, maxLines)
+func (s *Session) ReadOutput(ctx context.Context, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	return s.readOutput(ctx, s.readerID, timeout, stripAnsi, maxLines)
 }
 
 // ReadOutputForReader reads new output for a specific reader ID.
-func (s *Session) ReadOutputForReader(readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
-	return s.readOutput(readerID, timeout, stripAnsi, maxLines)
+func (s *Session) ReadOutputForReader(ctx context.Context, readerID int, timeout time.Duration, stripAnsi bool, maxLines int) (string, error) {
+	return s.readOutput(ctx, readerID, timeout, stripAnsi, maxLines)
 }
 
 // Terminate gracefully or forcefully stops the process.

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
@@ -106,7 +107,7 @@ func TestSession_SendInputReadOutput(t *testing.T) {
 	var output string
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		chunk, _ := s.ReadOutput(500*time.Millisecond, true, 0)
+		chunk, _ := s.ReadOutput(context.Background(), 500*time.Millisecond, true, 0)
 		output += chunk
 		if strings.Contains(output, "session_test") {
 			break

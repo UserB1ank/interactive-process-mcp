@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"context"
 	"io"
 	"strings"
 	"sync"
@@ -15,7 +16,7 @@ func TestBuffer_WriteAndRead(t *testing.T) {
 	b.Write([]byte("hello"))
 	b.Write([]byte(" world"))
 
-	data, err := b.Read(r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +25,7 @@ func TestBuffer_WriteAndRead(t *testing.T) {
 	}
 
 	// Second read with no new data should return empty immediately
-	data, err = b.Read(r, 0)
+	data, err = b.Read(context.Background(), r, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func TestBuffer_ReadWaitsForData(t *testing.T) {
 		close(done)
 	}()
 
-	data, err := b.Read(r, 2*time.Second)
+	data, err := b.Read(context.Background(), r, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestBuffer_ReadTimeout(t *testing.T) {
 	b := New(1024)
 	r, _ := b.NewReader()
 	start := time.Now()
-	data, err := b.Read(r, 200*time.Millisecond)
+	data, err := b.Read(context.Background(), r, 200*time.Millisecond)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +81,7 @@ func TestBuffer_Overwrite(t *testing.T) {
 	b.Write([]byte(strings.Repeat("b", 16)))
 	b.Write([]byte(strings.Repeat("c", 16)))
 
-	data, err := b.Read(r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestBuffer_CloseWakesReaders(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		data, err := b.Read(r, 10*time.Second)
+		data, err := b.Read(context.Background(), r, 10*time.Second)
 		if len(data) != 0 {
 			t.Errorf("expected empty on close, got %q", string(data))
 		}
@@ -133,7 +134,7 @@ func TestBuffer_WriteAfterClose(t *testing.T) {
 		t.Fatalf("expected ErrClosed, got %v", err)
 	}
 
-	data, err := b.Read(r, time.Second)
+	data, err := b.Read(context.Background(), r, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestBuffer_ConcurrentReadWrite(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(50 * time.Millisecond)
-		b.Read(r, 2*time.Second)
+		b.Read(context.Background(), r, 2*time.Second)
 	}()
 
 	wg.Wait()
@@ -174,11 +175,11 @@ func TestBuffer_MultiReaderIndependence(t *testing.T) {
 
 	b.Write([]byte("hello"))
 
-	data1, err := b.Read(r1, time.Second)
+	data1, err := b.Read(context.Background(), r1, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data2, err := b.Read(r2, time.Second)
+	data2, err := b.Read(context.Background(), r2, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,19 +199,19 @@ func TestBuffer_MultiReaderSequentialWrite(t *testing.T) {
 
 	b.Write([]byte("chunk1"))
 	// r1 reads chunk1
-	data1, _ := b.Read(r1, time.Second)
+	data1, _ := b.Read(context.Background(), r1, time.Second)
 	if string(data1) != "chunk1" {
 		t.Fatalf("r1 expected 'chunk1', got %q", string(data1))
 	}
 
 	b.Write([]byte("chunk2"))
 	// r1 reads only chunk2
-	data1, _ = b.Read(r1, time.Second)
+	data1, _ = b.Read(context.Background(), r1, time.Second)
 	if string(data1) != "chunk2" {
 		t.Fatalf("r1 expected 'chunk2', got %q", string(data1))
 	}
 	// r2 reads both chunk1 and chunk2
-	data2, _ := b.Read(r2, time.Second)
+	data2, _ := b.Read(context.Background(), r2, time.Second)
 	s2 := string(data2)
 	if !strings.Contains(s2, "chunk1") || !strings.Contains(s2, "chunk2") {
 		t.Fatalf("r2 expected both chunks, got %q", s2)
@@ -225,7 +226,7 @@ func TestBuffer_Unregister(t *testing.T) {
 	b.Unregister(r)
 
 	// Read from unregistered reader should return error
-	_, err := b.Read(r, 0)
+	_, err := b.Read(context.Background(), r, 0)
 	if err != ErrReader {
 		t.Fatalf("expected ErrReader, got %v", err)
 	}
@@ -237,7 +238,7 @@ func TestBuffer_UnregisterWakesReader(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := b.Read(r, 10*time.Second)
+		_, err := b.Read(context.Background(), r, 10*time.Second)
 		done <- err
 	}()
 
@@ -267,7 +268,7 @@ func TestBuffer_HasMore(t *testing.T) {
 		t.Fatal("expected data after write")
 	}
 
-	b.Read(r, 0)
+	b.Read(context.Background(), r, 0)
 	if b.HasMore(r) {
 		t.Fatal("expected no data after read")
 	}
@@ -275,9 +276,51 @@ func TestBuffer_HasMore(t *testing.T) {
 
 func TestBuffer_InvalidReader(t *testing.T) {
 	b := New(1024)
-	_, err := b.Read(999, 0)
+	_, err := b.Read(context.Background(), 999, 0)
 	if err != ErrReader {
 		t.Fatalf("expected ErrReader, got %v", err)
+	}
+}
+
+func TestBuffer_ReadCancelledContext(t *testing.T) {
+	b := New(1024)
+	r, _ := b.NewReader()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	data, err := b.Read(ctx, r, 10*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("Read should return quickly on ctx cancel, took %v", elapsed)
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected empty data on cancelled ctx, got %q", string(data))
+	}
+	if err != nil {
+		t.Fatalf("expected nil error on cancelled ctx, got %v", err)
+	}
+}
+
+func TestBuffer_ReadCancelledContextWithData(t *testing.T) {
+	b := New(1024)
+	r, _ := b.NewReader()
+
+	ctx := context.Background()
+
+	// Write data first, then read with valid ctx — should get data immediately
+	b.Write([]byte("hello"))
+	data, err := b.Read(ctx, r, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("expected 'hello', got %q", string(data))
 	}
 }
 
@@ -299,7 +342,7 @@ func TestBuffer_ReadTimeoutReliability(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		done := make(chan struct{})
 		go func() {
-			data, err := b.Read(r, 50*time.Millisecond)
+			data, err := b.Read(context.Background(), r, 50*time.Millisecond)
 			if err != nil && err != io.EOF {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -335,7 +378,7 @@ func TestBuffer_StressConcurrentReadCloseUnregister(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			b.Read(r, 100*time.Millisecond)
+			b.Read(context.Background(), r, 100*time.Millisecond)
 		}()
 		go func() {
 			defer wg.Done()
