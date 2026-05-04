@@ -14,9 +14,6 @@
 <p align="center">
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/🐧-linux.do-ff69b4.svg" alt="linux.do"></a>
   <a href="./README.zh.md"><img src="https://img.shields.io/badge/🌏-中文-blue.svg" alt="中文"></a>
-  <img src="https://img.shields.io/github/v/release/UserB1ank/interactive-process-mcp.svg" alt="Release">
-  <img src="https://goreportcard.com/badge/github.com/mac01/interactive-process-mcp" alt="Go Report Card">
-  <img src="https://img.shields.io/github/stars/UserB1ank/interactive-process-mcp?style=social" alt="Stars">
 </p>
 
 <p align="center">
