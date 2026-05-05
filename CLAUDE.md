@@ -1,3 +1,13 @@
+## Security & Privacy
+
+禁止在项目中出现以下敏感信息和敏感文件：
+
+- 本机 hostname、本地用户名称
+- 真实密钥、API keys、tokens、passwords
+- 邮箱地址、手机号等个人信息
+- .env 文件、私钥文件（PEM、SSH key 等）
+- 禁止出现 `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` 相关字样
+
 ## Agent skills
 
 ### Issue tracker
