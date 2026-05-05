@@ -24,3 +24,4 @@ docs/superpowers/
 
 # other program
 templates/
+.env
