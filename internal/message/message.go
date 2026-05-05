@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
-	"github.com/mac01/interactive-process-mcp/internal/storage"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/storage"
 )
 
 // Manager handles persistence of session messages.

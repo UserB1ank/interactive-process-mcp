@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/mac01/interactive-process-mcp/internal/config"
-	mcpmod "github.com/mac01/interactive-process-mcp/internal/mcp"
-	"github.com/mac01/interactive-process-mcp/internal/message"
-	"github.com/mac01/interactive-process-mcp/internal/session"
-	"github.com/mac01/interactive-process-mcp/internal/sshserver"
-	"github.com/mac01/interactive-process-mcp/internal/storage"
+	"github.com/UserB1ank/interactive-process-mcp/internal/config"
+	mcpmod "github.com/UserB1ank/interactive-process-mcp/internal/mcp"
+	"github.com/UserB1ank/interactive-process-mcp/internal/message"
+	"github.com/UserB1ank/interactive-process-mcp/internal/session"
+	"github.com/UserB1ank/interactive-process-mcp/internal/sshserver"
+	"github.com/UserB1ank/interactive-process-mcp/internal/storage"
 )
 
 func main() {

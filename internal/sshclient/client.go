@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mac01/interactive-process-mcp/internal/sshserver"
+	"github.com/UserB1ank/interactive-process-mcp/internal/sshserver"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )

@@ -1,4 +1,4 @@
-module github.com/mac01/interactive-process-mcp
+module github.com/UserB1ank/interactive-process-mcp
 
 go 1.25.9
 

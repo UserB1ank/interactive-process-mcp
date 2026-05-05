@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mac01/interactive-process-mcp/internal/sshserver"
+	"github.com/UserB1ank/interactive-process-mcp/internal/sshserver"
 )
 
 func startTestSSHServer(t *testing.T) (*sshserver.Server, string) {

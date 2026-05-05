@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mac01/interactive-process-mcp/internal/sshserver"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/sshserver"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 func TestInfo_DeepCopyExitCode(t *testing.T) {

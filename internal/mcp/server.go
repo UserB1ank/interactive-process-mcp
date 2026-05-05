@@ -6,8 +6,8 @@ import (
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mac01/interactive-process-mcp/internal/message"
-	"github.com/mac01/interactive-process-mcp/internal/session"
+	"github.com/UserB1ank/interactive-process-mcp/internal/message"
+	"github.com/UserB1ank/interactive-process-mcp/internal/session"
 )
 
 // Server wraps the MCP SSE server and tool handlers.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 func TestStore_SaveLoadSessions(t *testing.T) {

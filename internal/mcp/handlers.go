@@ -8,8 +8,8 @@ import (
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mac01/interactive-process-mcp/internal/session"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/session"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 func getString(args map[string]any, key, def string) string {

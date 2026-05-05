@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
-	"github.com/mac01/interactive-process-mcp/internal/ansi"
-	"github.com/mac01/interactive-process-mcp/internal/buffer"
-	"github.com/mac01/interactive-process-mcp/internal/message"
-	"github.com/mac01/interactive-process-mcp/internal/sshclient"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/ansi"
+	"github.com/UserB1ank/interactive-process-mcp/internal/buffer"
+	"github.com/UserB1ank/interactive-process-mcp/internal/message"
+	"github.com/UserB1ank/interactive-process-mcp/internal/sshclient"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )

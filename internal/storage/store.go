@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 var (

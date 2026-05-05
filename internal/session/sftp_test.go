@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 func TestSFTP_UploadDownloadRoundTrip(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mac01/interactive-process-mcp/internal/storage"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/storage"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 func TestManager_AppendAndList(t *testing.T) {

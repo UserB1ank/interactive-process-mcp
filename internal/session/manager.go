@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mac01/interactive-process-mcp/internal/message"
-	"github.com/mac01/interactive-process-mcp/internal/storage"
-	"github.com/mac01/interactive-process-mcp/pkg/api"
+	"github.com/UserB1ank/interactive-process-mcp/internal/message"
+	"github.com/UserB1ank/interactive-process-mcp/internal/storage"
+	"github.com/UserB1ank/interactive-process-mcp/pkg/api"
 )
 
 // Manager is a thread-safe registry of sessions with persistence.
