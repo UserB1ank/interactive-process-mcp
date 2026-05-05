@@ -1,7 +1,7 @@
 # interactive-process-mcp
 
 <p align="center">
-  <strong>让 AI Agent 拥有交互式终端能力</strong>
+  <strong>让 AI Agent 拥有交互式终端能力[目前已经迁移到[termcp](https://github.com/open-mcp-ai/termcp)]</strong>
 </p>
 
 <p align="center">

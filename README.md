@@ -1,7 +1,7 @@
 # interactive-process-mcp
 
 <p align="center">
-  <strong>Give AI Agents Interactive Terminal Capabilities</strong>
+  <strong>Give AI Agents Interactive Terminal Capabilitiesnow has been migrated to [termcp](https://github.com/open-mcp-ai/termcp)</strong>
 </p>
 
 <p align="center">
